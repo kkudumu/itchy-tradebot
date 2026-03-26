@@ -291,6 +291,7 @@ def run_backtest(args: argparse.Namespace) -> int:
             candles_1m=candles,
             instrument=args.instrument,
             log_trades=args.log_trades,
+            enable_learning=True,
         )
     except Exception as exc:
         logger.exception("Backtest failed: %s", exc)
@@ -299,6 +300,7 @@ def run_backtest(args: argparse.Namespace) -> int:
     # Display results
     m = result.metrics
     pf = result.prop_firm
+    learning_phase = backtester.learning_engine.get_phase()
 
     print("\n" + "=" * 60)
     print(f"  BACKTEST RESULTS — {args.instrument}")
@@ -311,6 +313,7 @@ def run_backtest(args: argparse.Namespace) -> int:
     print(f"  Profit factor:      {m.get('profit_factor') or 'N/A'}")
     print(f"  Expectancy (R):     {m.get('expectancy', 0):.3f}")
     print(f"  Skipped signals:    {result.skipped_signals}")
+    print(f"  Learning phase:     {learning_phase}")
     print()
     print(f"  Prop firm status:   {pf.get('status', 'N/A')}")
     print(f"  Prop firm profit:   {pf.get('profit_pct', 0):.2f}%")
@@ -325,6 +328,23 @@ def run_backtest(args: argparse.Namespace) -> int:
     equity_path = output_dir / f"equity_curve_{ts}.csv"
     result.equity_curve.to_csv(equity_path)
     logger.info("Equity curve saved to %s", equity_path)
+
+    # Generate visual dashboard
+    try:
+        from src.backtesting.dashboard import BacktestDashboard
+        dashboard = BacktestDashboard()
+        dash_path = dashboard.save_and_open(
+            result=result,
+            output_dir=args.output_dir,
+            initial_balance=args.initial_balance,
+            learning_phase=learning_phase,
+            learning_skipped=0,
+            instrument=args.instrument,
+            auto_open=True,
+        )
+        print(f"\n  Dashboard: {dash_path}")
+    except Exception as exc:
+        logger.warning("Dashboard generation failed (matplotlib may not be installed): %s", exc)
 
     return 0
 
