@@ -1,0 +1,555 @@
+"""
+Demo challenge CLI orchestrator for the XAU/USD Ichimoku trading agent.
+
+Orchestrates the full pipeline:
+    load config -> prepare data -> run backtest -> optimize -> validate -> report
+
+Usage examples
+--------------
+# Run a backtest on a local data file:
+    python scripts/run_demo_challenge.py --mode backtest --data-file xauusd_1m.parquet
+
+# Run a backtest with custom config:
+    python scripts/run_demo_challenge.py --mode backtest --data-file data.parquet \\
+        --config config/my_config.yaml
+
+# Run validation pipeline (walk-forward + Monte Carlo + go/no-go):
+    python scripts/run_demo_challenge.py --mode validate --data-file data.parquet \\
+        --wf-trials 100 --mc-sims 5000
+
+# Live mode (requires MT5 on Windows, mocked in backtest):
+    python scripts/run_demo_challenge.py --mode live \\
+        --mt5-login 12345 --mt5-password mypassword --mt5-server The5ers-Demo
+
+Modes
+-----
+backtest  : Load data, run full backtest, compute metrics, generate report.
+validate  : Backtest + walk-forward analysis + Monte Carlo + go/no-go verdict.
+live      : Connect to MT5, run the signal engine on live data. (Windows only)
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+# Make project root importable when running from scripts/ directory.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+import pandas as pd
+import numpy as np
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("run_demo_challenge")
+
+
+# =============================================================================
+# CLI argument definition
+# =============================================================================
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="XAU/USD Ichimoku demo challenge orchestrator.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # Operating mode
+    p.add_argument(
+        "--mode",
+        choices=["backtest", "validate", "live"],
+        default="backtest",
+        help="Pipeline mode: backtest, validate, or live.",
+    )
+
+    # Config file
+    p.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to the configuration directory (default: project config/).",
+    )
+
+    # Data source (required for backtest and validate modes)
+    data_group = p.add_mutually_exclusive_group()
+    data_group.add_argument(
+        "--data-file",
+        type=str,
+        default=None,
+        help="Path to a 1-minute OHLCV CSV or Parquet file.",
+    )
+    data_group.add_argument(
+        "--synthetic-data",
+        action="store_true",
+        default=False,
+        help="Use synthetic data for quick testing (backtest mode only).",
+    )
+
+    # Backtest options
+    p.add_argument(
+        "--initial-balance",
+        type=float,
+        default=10_000.0,
+        help="Starting account balance for backtest/optimize.",
+    )
+    p.add_argument(
+        "--instrument",
+        type=str,
+        default="XAUUSD",
+        help="Instrument symbol.",
+    )
+
+    # Validation options
+    p.add_argument(
+        "--wf-trials",
+        type=int,
+        default=100,
+        help="Optuna trials per walk-forward window (validate mode).",
+    )
+    p.add_argument(
+        "--mc-sims",
+        type=int,
+        default=5000,
+        help="Monte Carlo simulations (validate mode).",
+    )
+    p.add_argument(
+        "--haircut",
+        type=float,
+        default=25.0,
+        help="Percentage haircut applied to OOS metrics.",
+    )
+
+    # Live mode options
+    p.add_argument(
+        "--mt5-login",
+        type=int,
+        default=None,
+        help="MT5 account login (live mode, Windows only).",
+    )
+    p.add_argument(
+        "--mt5-password",
+        type=str,
+        default=None,
+        help="MT5 account password (live mode).",
+    )
+    p.add_argument(
+        "--mt5-server",
+        type=str,
+        default=None,
+        help="MT5 broker server name (live mode).",
+    )
+
+    # Output
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        default="reports",
+        help="Directory for output reports and logs.",
+    )
+    p.add_argument(
+        "--log-trades",
+        action="store_true",
+        default=False,
+        help="Persist completed trades to database (requires DB connection).",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducibility.",
+    )
+
+    return p
+
+
+# =============================================================================
+# Data loading helpers
+# =============================================================================
+
+
+def _load_data_file(path: str) -> pd.DataFrame:
+    """Load 1-minute OHLCV data from CSV or Parquet."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Data file not found: {path}")
+
+    logger.info("Loading data from %s", path)
+    if p.suffix.lower() in (".parquet", ".pq"):
+        df = pd.read_parquet(path)
+    elif p.suffix.lower() in (".csv", ".txt"):
+        df = pd.read_csv(path, parse_dates=["time"])
+        if "time" in df.columns:
+            df = df.set_index("time")
+    else:
+        raise ValueError(f"Unsupported file format: {p.suffix}")
+
+    # Ensure UTC DatetimeIndex
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("DataFrame must have a DatetimeIndex")
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+
+    # Normalise column names to lowercase
+    df.columns = df.columns.str.lower()
+
+    required = {"open", "high", "low", "close"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    logger.info("Loaded %d bars from %s to %s", len(df), df.index[0], df.index[-1])
+    return df
+
+
+def _generate_synthetic_data(n: int = 10_000, seed: int = 42) -> pd.DataFrame:
+    """Generate synthetic 1-minute OHLCV data for quick testing."""
+    rng = np.random.default_rng(seed)
+    start = datetime(2020, 1, 2, 8, 0, tzinfo=timezone.utc)
+    from datetime import timedelta
+
+    prices = [1800.0]
+    for _ in range(n - 1):
+        prices.append(prices[-1] + rng.normal(0.02, 1.5))
+
+    prices = np.array(prices)
+    timestamps = [start + timedelta(minutes=i) for i in range(n)]
+
+    rows = []
+    for p in prices:
+        noise = rng.uniform(0, 0.5, 4)
+        o = p + noise[0] - 0.25
+        h = max(o, p) + noise[1]
+        l = min(o, p) - noise[2]
+        c = p + noise[3] - 0.25
+        rows.append({"open": o, "high": h, "low": l, "close": c, "volume": int(rng.integers(100, 800))})
+
+    df = pd.DataFrame(rows, index=pd.DatetimeIndex(timestamps, tz=timezone.utc))
+    logger.info("Generated %d synthetic 1M bars", len(df))
+    return df
+
+
+# =============================================================================
+# Pipeline: BACKTEST mode
+# =============================================================================
+
+
+def run_backtest(args: argparse.Namespace) -> int:
+    """Execute the full backtest pipeline and print results.
+
+    Returns 0 on success, 1 on failure.
+    """
+    logger.info("=== BACKTEST MODE ===")
+
+    # Load data
+    try:
+        if args.synthetic_data:
+            candles = _generate_synthetic_data(seed=args.seed or 42)
+        elif args.data_file:
+            candles = _load_data_file(args.data_file)
+        else:
+            logger.error("Backtest mode requires --data-file or --synthetic-data")
+            return 1
+    except Exception as exc:
+        logger.error("Data loading failed: %s", exc)
+        return 1
+
+    # Load config
+    try:
+        from src.config.loader import ConfigLoader
+        config_dir = args.config or None
+        loader = ConfigLoader(config_dir=config_dir)
+        app_config = loader.load()
+        logger.info("Config loaded from %s", loader.config_dir)
+    except Exception as exc:
+        logger.error("Config loading failed: %s", exc)
+        return 1
+
+    # Run backtest
+    logger.info("Running backtest on %d bars ...", len(candles))
+    try:
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+
+        backtester = IchimokuBacktester(
+            initial_balance=args.initial_balance,
+            prop_firm_profit_target_pct=8.0,
+            prop_firm_max_daily_dd_pct=5.0,
+            prop_firm_max_total_dd_pct=10.0,
+            prop_firm_time_limit_days=30,
+        )
+        result = backtester.run(
+            candles_1m=candles,
+            instrument=args.instrument,
+            log_trades=args.log_trades,
+        )
+    except Exception as exc:
+        logger.exception("Backtest failed: %s", exc)
+        return 1
+
+    # Display results
+    m = result.metrics
+    pf = result.prop_firm
+
+    print("\n" + "=" * 60)
+    print(f"  BACKTEST RESULTS — {args.instrument}")
+    print("=" * 60)
+    print(f"  Total trades:       {m.get('total_trades', 0)}")
+    print(f"  Win rate:           {m.get('win_rate', 0):.1%}")
+    print(f"  Total return:       {m.get('total_return_pct', 0):.2f}%")
+    print(f"  Sharpe ratio:       {m.get('sharpe_ratio', 0):.2f}")
+    print(f"  Max drawdown:       {m.get('max_drawdown_pct', 0):.2f}%")
+    print(f"  Profit factor:      {m.get('profit_factor') or 'N/A'}")
+    print(f"  Expectancy (R):     {m.get('expectancy', 0):.3f}")
+    print(f"  Skipped signals:    {result.skipped_signals}")
+    print()
+    print(f"  Prop firm status:   {pf.get('status', 'N/A')}")
+    print(f"  Prop firm profit:   {pf.get('profit_pct', 0):.2f}%")
+    print(f"  Max daily DD:       {pf.get('max_daily_dd_pct', 0):.2f}%")
+    print(f"  Max total DD:       {pf.get('max_total_dd_pct', 0):.2f}%")
+    print("=" * 60)
+
+    # Save equity curve to output dir
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    equity_path = output_dir / f"equity_curve_{ts}.csv"
+    result.equity_curve.to_csv(equity_path)
+    logger.info("Equity curve saved to %s", equity_path)
+
+    return 0
+
+
+# =============================================================================
+# Pipeline: VALIDATE mode
+# =============================================================================
+
+
+def run_validate(args: argparse.Namespace) -> int:
+    """Execute the full validation pipeline.
+
+    Steps: walk-forward -> Monte Carlo -> go/no-go -> report.
+    Returns 0 on success, 1 on failure.
+    """
+    logger.info("=== VALIDATE MODE ===")
+
+    # Load data
+    try:
+        if args.synthetic_data:
+            candles = _generate_synthetic_data(seed=args.seed or 42)
+        elif args.data_file:
+            candles = _load_data_file(args.data_file)
+        else:
+            logger.error("Validate mode requires --data-file or --synthetic-data")
+            return 1
+    except Exception as exc:
+        logger.error("Data loading failed: %s", exc)
+        return 1
+
+    # Run validation
+    logger.info(
+        "Running validation pipeline (wf_trials=%d, mc_sims=%d) ...",
+        args.wf_trials,
+        args.mc_sims,
+    )
+    try:
+        from src.validation.go_nogo import GoNoGoValidator
+
+        validator = GoNoGoValidator(
+            data=candles,
+            initial_balance=args.initial_balance,
+            haircut_pct=args.haircut,
+        )
+        validation_result = validator.run_full_validation(
+            n_wf_trials=args.wf_trials,
+            n_mc_sims=args.mc_sims,
+            seed=args.seed,
+        )
+    except Exception as exc:
+        logger.exception("Validation failed: %s", exc)
+        return 1
+
+    # Print verdict
+    vr = validation_result.validation_result
+    mc = validation_result.monte_carlo
+
+    print("\n" + "=" * 60)
+    print("  PRE-CHALLENGE VALIDATION REPORT")
+    print("=" * 60)
+    print(f"  Final verdict:      {validation_result.final_verdict}")
+    print(f"  OOS trades:         {validation_result.n_oos_trades}")
+    print(f"  WFE:                {validation_result.overfit_report.wfe:.2f}")
+    print(f"  DSR:                {validation_result.overfit_report.dsr:.4f}")
+    print(f"  MC pass rate:       {mc.pass_rate:.1f}%")
+    print(f"  MC avg days:        {mc.avg_days:.1f}")
+    print()
+    print("  Recommendations:")
+    for rec in validation_result.recommendations:
+        print(f"    - {rec}")
+    print("=" * 60)
+
+    # Persist report
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = output_dir / f"validation_{ts}.txt"
+    with open(report_path, "w") as fh:
+        fh.write(f"Validation report: {ts}\n")
+        fh.write(f"Verdict: {validation_result.final_verdict}\n")
+        for rec in validation_result.recommendations:
+            fh.write(f"- {rec}\n")
+    logger.info("Report saved to %s", report_path)
+
+    # Return non-zero exit code for NO-GO verdict (useful in CI pipelines)
+    return 0 if validation_result.final_verdict in ("GO", "BORDERLINE") else 1
+
+
+# =============================================================================
+# Pipeline: LIVE mode
+# =============================================================================
+
+
+def run_live(args: argparse.Namespace) -> int:
+    """Connect to MT5 and run the live signal engine.
+
+    MetaTrader5 is only available on Windows.  This function will fail
+    gracefully with an informative error on Linux.
+
+    Returns 0 on clean shutdown, 1 on connection / execution failure.
+    """
+    logger.info("=== LIVE MODE ===")
+
+    if not args.mt5_login or not args.mt5_password or not args.mt5_server:
+        logger.error(
+            "Live mode requires --mt5-login, --mt5-password, and --mt5-server"
+        )
+        return 1
+
+    # Build components
+    try:
+        from src.config.loader import ConfigLoader
+        config_dir = args.config or None
+        app_config = ConfigLoader(config_dir=config_dir).load()
+    except Exception as exc:
+        logger.error("Config loading failed: %s", exc)
+        return 1
+
+    # Connect MT5
+    try:
+        from src.execution.mt5_bridge import MT5Bridge
+
+        bridge = MT5Bridge(
+            login=args.mt5_login,
+            password=args.mt5_password,
+            server=args.mt5_server,
+        )
+        if not bridge.connect():
+            logger.error("MT5 connection failed")
+            return 1
+        logger.info("MT5 connected to %s", args.mt5_server)
+    except ImportError:
+        logger.error(
+            "MetaTrader5 package not available. "
+            "Live mode requires a Windows host with MT5 installed."
+        )
+        return 1
+    except Exception as exc:
+        logger.exception("MT5 connection error: %s", exc)
+        return 1
+
+    # Build engine
+    try:
+        from src.strategy.signal_engine import SignalEngine
+        from src.edges.manager import EdgeManager
+        from src.risk.position_sizer import AdaptivePositionSizer
+        from src.risk.circuit_breaker import DailyCircuitBreaker
+        from src.risk.exit_manager import HybridExitManager
+        from src.risk.trade_manager import TradeManager
+        from src.learning.embeddings import EmbeddingEngine
+        from src.learning.similarity import SimilaritySearch
+        from src.zones.manager import ZoneManager
+        from src.execution.order_manager import OrderManager
+        from src.engine.decision_engine import DecisionEngine
+
+        signal_engine = SignalEngine(instrument=args.instrument)
+        edge_manager = EdgeManager(app_config.edges)
+        sizer = AdaptivePositionSizer(initial_balance=args.initial_balance)
+        breaker = DailyCircuitBreaker(max_daily_loss_pct=2.0)
+        exit_mgr = HybridExitManager()
+        trade_mgr = TradeManager(
+            position_sizer=sizer,
+            circuit_breaker=breaker,
+            exit_manager=exit_mgr,
+        )
+        embedding_engine = EmbeddingEngine()
+        similarity = SimilaritySearch(db_pool=None)
+        zone_manager = ZoneManager()
+        order_manager = OrderManager(bridge=bridge)
+
+        engine = DecisionEngine(
+            config={"instrument": args.instrument},
+            signal_engine=signal_engine,
+            edge_manager=edge_manager,
+            trade_manager=trade_mgr,
+            similarity_search=similarity,
+            embedding_engine=embedding_engine,
+            zone_manager=zone_manager,
+            mt5_bridge=bridge,
+            order_manager=order_manager,
+        )
+
+        logger.info("Live engine initialised — starting scan loop")
+        engine.start()
+
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested by user (Ctrl+C)")
+    except Exception as exc:
+        logger.exception("Live engine error: %s", exc)
+        return 1
+    finally:
+        try:
+            bridge.disconnect()
+        except Exception:
+            pass
+
+    return 0
+
+
+# =============================================================================
+# Entry point
+# =============================================================================
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    logger.info(
+        "Starting demo challenge — mode=%s instrument=%s balance=%.0f",
+        args.mode,
+        args.instrument,
+        args.initial_balance,
+    )
+
+    if args.mode == "backtest":
+        return run_backtest(args)
+    elif args.mode == "validate":
+        return run_validate(args)
+    elif args.mode == "live":
+        return run_live(args)
+    else:
+        logger.error("Unknown mode: %s", args.mode)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
