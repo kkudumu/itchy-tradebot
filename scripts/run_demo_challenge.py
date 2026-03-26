@@ -275,6 +275,16 @@ def run_backtest(args: argparse.Namespace) -> int:
         logger.error("Config loading failed: %s", exc)
         return 1
 
+    # Start live dashboard server
+    live_server = None
+    try:
+        from src.backtesting.live_dashboard import LiveDashboardServer
+        live_server = LiveDashboardServer(port=8501, auto_open=True)
+        live_server.start()
+        logger.info("Live dashboard: %s", live_server.url)
+    except Exception as exc:
+        logger.warning("Could not start live dashboard: %s", exc)
+
     # Run backtest
     logger.info("Running backtest on %d bars ...", len(candles))
     try:
@@ -292,6 +302,7 @@ def run_backtest(args: argparse.Namespace) -> int:
             instrument=args.instrument,
             log_trades=args.log_trades,
             enable_learning=True,
+            live_dashboard=live_server,
         )
     except Exception as exc:
         logger.exception("Backtest failed: %s", exc)
@@ -329,7 +340,7 @@ def run_backtest(args: argparse.Namespace) -> int:
     result.equity_curve.to_csv(equity_path)
     logger.info("Equity curve saved to %s", equity_path)
 
-    # Generate visual dashboard
+    # Generate static dashboard report (saved to disk, opens only if no live dashboard)
     try:
         from src.backtesting.dashboard import BacktestDashboard
         dashboard = BacktestDashboard()
@@ -340,11 +351,21 @@ def run_backtest(args: argparse.Namespace) -> int:
             learning_phase=learning_phase,
             learning_skipped=0,
             instrument=args.instrument,
-            auto_open=True,
+            auto_open=(live_server is None),  # only auto-open if no live dashboard
         )
-        print(f"\n  Dashboard: {dash_path}")
+        print(f"\n  Dashboard report: {dash_path}")
     except Exception as exc:
         logger.warning("Dashboard generation failed (matplotlib may not be installed): %s", exc)
+
+    if live_server is not None:
+        print(f"  Live dashboard still running at {live_server.url}")
+        print("  Press Ctrl+C to stop the server.")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            live_server.stop()
 
     return 0
 

@@ -205,6 +205,7 @@ class IchimokuBacktester:
         enable_learning: bool = True,
         enable_screenshots: bool = False,
         screenshot_dir: str = "backtest_screenshots",
+        live_dashboard=None,
     ) -> BacktestResult:
         """Execute a full backtest on 1-minute candle data.
 
@@ -227,6 +228,10 @@ class IchimokuBacktester:
             entry and exit.  Default: False (slow for large datasets).
         screenshot_dir:
             Root directory for backtest screenshot storage.
+        live_dashboard:
+            Optional LiveDashboardServer instance.  When provided, the
+            backtester pushes state updates every 5 bars for real-time
+            monitoring in a browser.
 
         Returns
         -------
@@ -280,6 +285,22 @@ class IchimokuBacktester:
 
         total_signals = 0
         skipped_signals = 0
+
+        # Live dashboard setup
+        import time as _time_mod
+        _bt_start_time = _time_mod.monotonic()
+        _total_5m_bars = len(df_5m)
+        _equity_sample: List[float] = []  # Sampled equity for live chart (max ~500 points)
+        _sample_interval = max(1, _total_5m_bars // 500)
+        _n_wins = 0
+        _n_losses = 0
+
+        if live_dashboard is not None:
+            live_dashboard.update({
+                "total_bars": _total_5m_bars,
+                "initial_balance": self._initial_balance,
+                "instrument": instrument,
+            })
 
         # 3. Main event loop over 5M bars
         for bar_idx, (ts_raw, row_5m) in enumerate(df_5m.iterrows()):
@@ -343,7 +364,10 @@ class IchimokuBacktester:
                         trade_summary, active_signal, active_context, instrument, balance
                     )
                     closed_trades.append(trade_summary)
-                    equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
+                    _r = float(trade_summary.get("r_multiple") or 0.0)
+                    equity_by_r.append(_r)
+                    if _r > 0: _n_wins += 1
+                    else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
                     self._record_learning(trade_summary, active_context, enable_learning)
                     if _screenshot_fn:
@@ -370,7 +394,10 @@ class IchimokuBacktester:
                             dict(trade_summary), active_signal, active_context, instrument, balance
                         )
                         closed_trades.append(trade_summary)
-                        equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
+                        _r = float(trade_summary.get("r_multiple") or 0.0)
+                        equity_by_r.append(_r)
+                        if _r > 0: _n_wins += 1
+                        else: _n_losses += 1
                         balance = self._update_balance_from_trade(balance, trade_summary)
                         self._record_learning(trade_summary, active_context, enable_learning)
                         if _screenshot_fn:
@@ -505,6 +532,57 @@ class IchimokuBacktester:
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
 
+            # Live dashboard update (every 5 bars to avoid overhead)
+            if live_dashboard is not None and bar_idx % 5 == 0:
+                if bar_idx % _sample_interval == 0:
+                    _equity_sample.append(balance)
+
+                elapsed = _time_mod.monotonic() - _bt_start_time
+                pct = (bar_idx + 1) / _total_5m_bars * 100 if _total_5m_bars > 0 else 0
+
+                # Build recent trades list for trade log
+                recent = []
+                for t in closed_trades[-10:]:
+                    recent.append({
+                        "id": len(closed_trades) - closed_trades[::-1].index(t),
+                        "dir": t.get("direction", "?"),
+                        "entry": f"{t.get('entry_price', 0):.1f}",
+                        "r": f"{t.get('r_multiple', 0):.2f}",
+                    })
+
+                # Running metrics
+                n_t = len(closed_trades)
+                wr = _n_wins / n_t if n_t > 0 else 0
+                ret_pct = (balance / self._initial_balance - 1) * 100
+                running_max = max(e[1] for e in equity_records) if equity_records else self._initial_balance
+                max_dd = (balance - running_max) / running_max * 100 if running_max > 0 else 0
+
+                live_dashboard.update({
+                    "bar_index": bar_idx + 1,
+                    "pct_complete": round(pct, 1),
+                    "elapsed_seconds": round(elapsed, 1),
+                    "equity": round(balance, 2),
+                    "equity_history": _equity_sample.copy(),
+                    "balance_pct": round(ret_pct, 2),
+                    "n_trades": n_t,
+                    "n_wins": _n_wins,
+                    "n_losses": _n_losses,
+                    "win_rate": round(wr, 4),
+                    "total_return_pct": round(ret_pct, 2),
+                    "max_dd_pct": round(abs(max_dd), 2),
+                    "worst_daily_dd_pct": 0.0,
+                    "sharpe": 0.0,
+                    "expectancy": round(sum(float(t.get("r_multiple", 0)) for t in closed_trades) / n_t, 3) if n_t > 0 else 0.0,
+                    "learning_phase": self.learning_engine.get_phase() if enable_learning else "disabled",
+                    "learning_trades": self._memory_store.trade_count if enable_learning else 0,
+                    "learning_skipped": learning_skipped,
+                    "prop_status": "active",
+                    "prop_profit_pct": round(ret_pct, 2),
+                    "total_signals": total_signals,
+                    "skipped_signals": skipped_signals,
+                    "recent_trades": recent,
+                })
+
         # ------------------------------------------------------------------
         # Force-close any trade still open at end of data
         # ------------------------------------------------------------------
@@ -520,9 +598,26 @@ class IchimokuBacktester:
                 trade_summary, active_signal, active_context, instrument, balance
             )
             closed_trades.append(trade_summary)
-            equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
+            _r = float(trade_summary.get("r_multiple") or 0.0)
+            equity_by_r.append(_r)
+            if _r > 0: _n_wins += 1
+            else: _n_losses += 1
             balance = self._update_balance_from_trade(balance, trade_summary)
             self._record_learning(trade_summary, active_context, enable_learning)
+
+        # Signal live dashboard completion
+        if live_dashboard is not None:
+            live_dashboard.finish({
+                "n_trades": len(closed_trades),
+                "n_wins": _n_wins,
+                "n_losses": _n_losses,
+                "equity": round(balance, 2),
+                "equity_history": _equity_sample,
+                "total_return_pct": round((balance / self._initial_balance - 1) * 100, 2),
+                "total_signals": total_signals,
+                "skipped_signals": skipped_signals,
+                "learning_skipped": learning_skipped,
+            })
 
         # ------------------------------------------------------------------
         # Persist trades to DB if requested
