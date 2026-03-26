@@ -37,7 +37,9 @@ from src.backtesting.metrics import PerformanceMetrics, PropFirmTracker
 from src.backtesting.trade_logger import TradeLogger
 from src.edges.base import EdgeContext
 from src.edges.manager import EdgeManager
+from src.learning.adaptive_engine import AdaptiveLearningEngine
 from src.learning.embeddings import EmbeddingEngine
+from src.learning.memory_store import InMemorySimilarityStore, InMemoryStatsAnalyzer
 from src.risk.circuit_breaker import DailyCircuitBreaker
 from src.risk.exit_manager import ActiveTrade, HybridExitManager
 from src.risk.position_sizer import AdaptivePositionSizer
@@ -172,6 +174,15 @@ class IchimokuBacktester:
             embedding_engine=self.embedding_engine,
         )
 
+        # In-memory learning components for always-on backtesting
+        self._memory_store = InMemorySimilarityStore(vector_dim=64)
+        self._memory_stats = InMemoryStatsAnalyzer()
+        self.learning_engine = AdaptiveLearningEngine(
+            similarity_search=self._memory_store,
+            embedding_engine=self.embedding_engine,
+            stats_analyzer=self._memory_stats,
+        )
+
         # Prop firm tracker
         self.prop_firm_tracker = PropFirmTracker(
             profit_target_pct=prop_firm_profit_target_pct,
@@ -191,6 +202,9 @@ class IchimokuBacktester:
         candles_1m: pd.DataFrame,
         instrument: str = "XAUUSD",
         log_trades: bool = False,
+        enable_learning: bool = True,
+        enable_screenshots: bool = False,
+        screenshot_dir: str = "backtest_screenshots",
     ) -> BacktestResult:
         """Execute a full backtest on 1-minute candle data.
 
@@ -203,6 +217,16 @@ class IchimokuBacktester:
         log_trades:
             When True, persist completed trades to the database via
             TradeLogger.  Default: False.
+        enable_learning:
+            When True, the adaptive learning engine is active during
+            backtest.  Trades are recorded to the in-memory similarity
+            store and stats analyzer, and pre_trade_analysis() is
+            consulted before each entry.  Default: True.
+        enable_screenshots:
+            When True, generate mplfinance candlestick charts at trade
+            entry and exit.  Default: False (slow for large datasets).
+        screenshot_dir:
+            Root directory for backtest screenshot storage.
 
         Returns
         -------
@@ -221,11 +245,24 @@ class IchimokuBacktester:
                 len(df_5m), _WARMUP_BARS,
             )
 
+        # Reset in-memory learning state for this run
+        if enable_learning:
+            self._memory_store.clear()
+            self._memory_stats.clear()
+            self.learning_engine.set_total_trades(0)
+            logger.info("Adaptive learning enabled — phases: mechanical → statistical → similarity")
+
+        # Screenshot helper (lazy import to avoid hard mplfinance dependency)
+        _screenshot_fn = None
+        if enable_screenshots:
+            _screenshot_fn = self._make_screenshot_fn(screenshot_dir, instrument)
+
         # 2. Initialise state
         balance = self._initial_balance
         equity_records: List[tuple] = []  # (timestamp, equity)
         closed_trades: List[dict] = []
         equity_by_r: List[float] = []  # closed R-multiples for equity curve modifier
+        learning_skipped: int = 0  # signals skipped by adaptive learning
 
         # Active trade state
         active_trade_id: Optional[int] = None
@@ -308,6 +345,9 @@ class IchimokuBacktester:
                     closed_trades.append(trade_summary)
                     equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
                     balance = self._update_balance_from_trade(balance, trade_summary)
+                    self._record_learning(trade_summary, active_context, enable_learning)
+                    if _screenshot_fn:
+                        _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
                     active_trade_id = None
                     active_trade = None
                     active_signal = None
@@ -332,6 +372,9 @@ class IchimokuBacktester:
                         closed_trades.append(trade_summary)
                         equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
                         balance = self._update_balance_from_trade(balance, trade_summary)
+                        self._record_learning(trade_summary, active_context, enable_learning)
+                        if _screenshot_fn:
+                            _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
                         active_trade_id = None
                         active_trade = None
                         active_signal = None
@@ -385,49 +428,78 @@ class IchimokuBacktester:
                                 next((r.reason for r in entry_results if not r.allowed), "unknown"),
                             )
                         else:
-                            # Position size modifier from modifier edges
-                            size_multiplier = self.edge_manager.get_combined_size_multiplier(edge_ctx_entry)
-
-                            # Open the trade
-                            try:
-                                atr_multiplier = self._config.get("atr_stop_multiplier", 1.5)
-                                trade_id, trade_obj, pos_size = self.trade_manager.open_trade(
-                                    entry_price=signal.entry_price,
-                                    stop_loss=signal.stop_loss,
-                                    take_profit=signal.take_profit,
-                                    direction=signal.direction,
-                                    atr=signal.atr,
-                                    point_value=self._point_value,
-                                    account_equity=balance * size_multiplier,
-                                    atr_multiplier=atr_multiplier,
-                                    instrument=instrument,
-                                    entry_time=ts,
+                            # Adaptive learning pre-trade gate
+                            learning_size_mult = 1.0
+                            learning_blocked = False
+                            if enable_learning:
+                                entry_context_pre = self._build_entry_context(
+                                    signal=signal, row_5m=row_5m,
+                                    htf_vals=htf_vals, ts=ts, risk_pct=0.0,
                                 )
+                                insight = self.learning_engine.pre_trade_analysis(entry_context_pre)
 
-                                active_trade_id = trade_id
-                                active_trade = trade_obj
-                                active_signal = signal
-                                candles_since_entry = 0
+                                if insight.recommendation == "skip":
+                                    skipped_signals += 1
+                                    learning_skipped += 1
+                                    learning_blocked = True
+                                    logger.debug(
+                                        "Signal at %s blocked by learning (%s): %s",
+                                        ts.isoformat(),
+                                        self.learning_engine.get_phase(),
+                                        insight.reasoning,
+                                    )
+                                elif insight.recommendation == "caution":
+                                    learning_size_mult = 0.75
 
-                                # Capture entry context for embedding
-                                active_context = self._build_entry_context(
-                                    signal=signal,
-                                    row_5m=row_5m,
-                                    htf_vals=htf_vals,
-                                    ts=ts,
-                                    risk_pct=pos_size.risk_pct,
-                                )
+                            if not learning_blocked:
+                                # Position size modifier from modifier edges
+                                size_multiplier = self.edge_manager.get_combined_size_multiplier(edge_ctx_entry)
+                                size_multiplier *= learning_size_mult
 
-                                logger.debug(
-                                    "Trade opened: %s %s @ %.2f SL=%.2f TP=%.2f "
-                                    "lots=%.2f risk=%.2f%%",
-                                    signal.direction, instrument, signal.entry_price,
-                                    signal.stop_loss, signal.take_profit,
-                                    pos_size.lot_size, pos_size.risk_pct,
-                                )
-                            except RuntimeError as exc:
-                                logger.debug("Trade open rejected: %s", exc)
-                                skipped_signals += 1
+                                # Open the trade
+                                try:
+                                    atr_multiplier = self._config.get("atr_stop_multiplier", 1.5)
+                                    trade_id, trade_obj, pos_size = self.trade_manager.open_trade(
+                                        entry_price=signal.entry_price,
+                                        stop_loss=signal.stop_loss,
+                                        take_profit=signal.take_profit,
+                                        direction=signal.direction,
+                                        atr=signal.atr,
+                                        point_value=self._point_value,
+                                        account_equity=balance * size_multiplier,
+                                        atr_multiplier=atr_multiplier,
+                                        instrument=instrument,
+                                        entry_time=ts,
+                                    )
+
+                                    active_trade_id = trade_id
+                                    active_trade = trade_obj
+                                    active_signal = signal
+                                    candles_since_entry = 0
+
+                                    # Capture entry context for embedding
+                                    active_context = self._build_entry_context(
+                                        signal=signal,
+                                        row_5m=row_5m,
+                                        htf_vals=htf_vals,
+                                        ts=ts,
+                                        risk_pct=pos_size.risk_pct,
+                                    )
+
+                                    # Entry screenshot
+                                    if _screenshot_fn:
+                                        _screenshot_fn(df_5m, bar_idx, "entry", trade_id)
+
+                                    logger.debug(
+                                        "Trade opened: %s %s @ %.2f SL=%.2f TP=%.2f "
+                                        "lots=%.2f risk=%.2f%%",
+                                        signal.direction, instrument, signal.entry_price,
+                                        signal.stop_loss, signal.take_profit,
+                                        pos_size.lot_size, pos_size.risk_pct,
+                                    )
+                                except RuntimeError as exc:
+                                    logger.debug("Trade open rejected: %s", exc)
+                                    skipped_signals += 1
 
             # Record equity at this bar
             equity_records.append((ts, balance))
@@ -450,6 +522,7 @@ class IchimokuBacktester:
             closed_trades.append(trade_summary)
             equity_by_r.append(float(trade_summary.get("r_multiple") or 0.0))
             balance = self._update_balance_from_trade(balance, trade_summary)
+            self._record_learning(trade_summary, active_context, enable_learning)
 
         # ------------------------------------------------------------------
         # Persist trades to DB if requested
@@ -475,13 +548,16 @@ class IchimokuBacktester:
 
         prop_status = self.prop_firm_tracker.check_pass()
 
+        learning_phase = self.learning_engine.get_phase() if enable_learning else "disabled"
         logger.info(
             "Backtest complete: %d trades, win_rate=%.1f%%, return=%.2f%%, "
-            "prop_firm=%s",
+            "prop_firm=%s, learning_phase=%s, learning_skipped=%d",
             len(closed_trades),
             metrics.get("win_rate", 0) * 100,
             metrics.get("total_return_pct", 0),
             prop_status.status,
+            learning_phase,
+            learning_skipped,
         )
 
         return BacktestResult(
@@ -719,6 +795,122 @@ class IchimokuBacktester:
         summary["context_embedding"] = embed_data["context_embedding"]
 
         return summary
+
+    # ------------------------------------------------------------------
+    # Adaptive learning helpers
+    # ------------------------------------------------------------------
+
+    def _record_learning(
+        self,
+        trade_summary: dict,
+        context: Optional[dict],
+        enable_learning: bool,
+    ) -> None:
+        """Record a closed trade to the in-memory learning components."""
+        if not enable_learning:
+            return
+
+        r_multiple = float(trade_summary.get("r_multiple") or 0.0)
+
+        # Record embedding to memory store for similarity search
+        embedding_list = trade_summary.get("context_embedding")
+        if embedding_list is not None:
+            embedding = np.array(embedding_list, dtype=np.float64)
+            self._memory_store.record_trade(
+                embedding=embedding,
+                r_multiple=r_multiple,
+                context=context,
+            )
+
+        # Record trade stats for statistical filtering
+        stats_record = {
+            "r_multiple": r_multiple,
+            "session": (context or {}).get("session", "unknown"),
+            "adx_value": (context or {}).get("adx_value", 0.0),
+            "confluence_score": trade_summary.get("confluence_score", 0),
+            "day_of_week": (context or {}).get("day_of_week", 0),
+            "direction": (context or {}).get("direction", "long"),
+            "signal_tier": trade_summary.get("signal_tier", "C"),
+        }
+        self._memory_stats.record_trade(stats_record)
+
+        # Update adaptive engine trade counter + post-trade analysis
+        self.learning_engine.post_trade_analysis(stats_record)
+
+        phase = self.learning_engine.get_phase()
+        store_n = self._memory_store.trade_count
+        if store_n % 50 == 0 and store_n > 0:
+            logger.info(
+                "Learning progress: %d trades recorded, phase=%s, "
+                "memory_store=%d embeddings",
+                store_n, phase, store_n,
+            )
+
+    # ------------------------------------------------------------------
+    # Backtest screenshot helper
+    # ------------------------------------------------------------------
+
+    def _make_screenshot_fn(self, screenshot_dir: str, instrument: str):
+        """Return a callable that generates mplfinance charts, or None on import failure."""
+        try:
+            import mplfinance as mpf
+        except ImportError:
+            logger.warning(
+                "mplfinance not installed — backtest screenshots disabled. "
+                "Install with: pip install mplfinance"
+            )
+            return None
+
+        from pathlib import Path
+
+        base_dir = Path(screenshot_dir) / instrument
+
+        def _capture(df_5m: pd.DataFrame, bar_idx: int, phase: str, trade_id: Optional[int]) -> str:
+            """Generate a candlestick chart around the trade event."""
+            # Show 50 bars before and 10 after (or end of data)
+            start = max(0, bar_idx - 50)
+            end = min(len(df_5m), bar_idx + 10)
+            chunk = df_5m.iloc[start:end].copy()
+
+            if chunk.empty:
+                return ""
+
+            # mplfinance needs DatetimeIndex
+            if not isinstance(chunk.index, pd.DatetimeIndex):
+                chunk.index = pd.DatetimeIndex(chunk.index)
+
+            # Rename tick_volume → volume if present
+            if "tick_volume" in chunk.columns and "volume" not in chunk.columns:
+                chunk = chunk.rename(columns={"tick_volume": "volume"})
+
+            ts = chunk.index[min(bar_idx - start, len(chunk) - 1)]
+            date_str = str(ts.date()).replace("-", "")
+            tid_part = f"_{trade_id}" if trade_id is not None else ""
+            filename = f"{phase}{tid_part}_{date_str}.png"
+            file_path = base_dir / date_str / filename
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            title = f"{instrument} 5M — {phase}"
+            if trade_id is not None:
+                title += f" (trade #{trade_id})"
+
+            try:
+                mpf.plot(
+                    chunk,
+                    type="candle",
+                    style="charles",
+                    title=title,
+                    volume=("volume" in chunk.columns),
+                    savefig=str(file_path),
+                    figsize=(12.8, 7.2),
+                )
+                return str(file_path)
+            except Exception as exc:
+                logger.debug("Screenshot generation failed: %s", exc)
+                return ""
+
+        return _capture
 
     # ------------------------------------------------------------------
     # Equity curve and daily P&L construction
