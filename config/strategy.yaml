@@ -1,0 +1,40 @@
+# Core strategy parameters for the XAU/USD Ichimoku system
+
+ichimoku:
+  tenkan_period: 9
+  kijun_period: 26
+  senkou_b_period: 52
+
+adx:
+  period: 14
+  threshold: 28  # Higher than standard (25) to filter weaker trends on gold
+
+atr:
+  period: 14
+  stop_multiplier: 1.5  # Initial stop = 1.5 × ATR beyond entry
+
+risk:
+  initial_risk_pct: 1.5    # % of account risked per trade in Phase 1 (0–+4%)
+  reduced_risk_pct: 0.75   # % of account risked per trade in Phase 2 (>+4%)
+  phase_threshold_pct: 4.0 # Account growth level that triggers phase switch
+  daily_circuit_breaker_pct: 2.0  # Halt trading after 2% daily drawdown
+  max_concurrent_positions: 1     # Gold — one position at a time
+
+exit:
+  strategy: hybrid_50_50          # Close 50% at TP; trail the remainder
+  tp_r_multiple: 2.0              # Initial TP at 2 R
+  trail_type: kijun               # Trailing mechanism: kijun | fixed | atr
+  breakeven_threshold_r: 1.0      # Move SL to BE once price reaches 1 R
+  kijun_trail_start_r: 1.5        # Begin Kijun trail from 1.5 R
+  higher_tf_kijun_start_r: 3.0   # Switch to higher-TF Kijun trail from 3 R
+
+signal:
+  min_confluence_score: 4
+  tier_a_plus: 7   # All major factors aligned — full risk allocation
+  tier_b: 5        # Strong signal — 75% risk allocation
+  tier_c: 4        # Minimum viable signal — 50% risk allocation
+  timeframes:
+    - "4H"
+    - "1H"
+    - "15M"
+    - "5M"

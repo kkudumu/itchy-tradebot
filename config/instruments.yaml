@@ -1,0 +1,14 @@
+# Per-instrument parameter overrides
+# Values here are merged on top of the base strategy config at runtime.
+# Omitting a field means "use the strategy default".
+
+instruments:
+  - symbol: "XAUUSD"
+    # Gold requires a wider ADX threshold to avoid choppy conditions
+    adx_threshold: 28
+    # Max acceptable spread in points (30 pts = $0.30/oz at standard lot)
+    spread_max_points: 30
+    # ATR stop multiplier — slightly wider for gold's intraday volatility
+    atr_stop_multiplier: 1.5
+    # USD value of 1 point per standard lot (gold: $1/pt for 100 oz contract)
+    pip_value_usd: 1.0

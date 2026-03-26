@@ -1,0 +1,17 @@
+# PostgreSQL connection settings
+# Sensitive values (password) should be supplied via environment variables.
+# The loader will use these as defaults; env vars take precedence at runtime.
+
+host: "localhost"
+port: 5432
+name: "trading"
+user: "trader"
+# password: set via PGPASSWORD or DATABASE_URL environment variable
+password: ""
+
+# Connection pooling
+pool_min: 1
+pool_max: 5
+
+# pgvector extension — dimension for trade pattern embeddings
+vector_dimensions: 128
