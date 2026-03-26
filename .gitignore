@@ -1,5 +1,6 @@
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # Python
 __pycache__/
