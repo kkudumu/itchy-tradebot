@@ -49,7 +49,18 @@ class TimescaleLoader:
         Forwarded directly to psycopg2.connect().
     """
 
-    def __init__(self, connection_config: dict) -> None:
+    def __init__(self, connection_config: dict | None = None) -> None:
+        # When no config is supplied, build one from environment variables
+        # using the same defaults as DBConfig in src/database/connection.py.
+        if connection_config is None:
+            import os
+            connection_config = {
+                "host": os.getenv("DB_HOST", "localhost"),
+                "port": int(os.getenv("DB_PORT", "5432")),
+                "dbname": os.getenv("DB_NAME", "trade_agent"),
+                "user": os.getenv("DB_USER", "postgres"),
+                "password": os.getenv("DB_PASSWORD", ""),
+            }
         # Normalise 'name' → 'dbname' so callers can pass the YAML key directly.
         cfg = dict(connection_config)
         if "name" in cfg and "dbname" not in cfg:
@@ -145,6 +156,71 @@ class TimescaleLoader:
             "bulk_insert complete: %d rows inserted for %s.", total_inserted, instrument
         )
         return total_inserted
+
+    # ------------------------------------------------------------------
+    # Query / load
+    # ------------------------------------------------------------------
+
+    def load(
+        self,
+        instrument: str = "XAUUSD",
+        start: str = "",
+        end: str = "",
+    ) -> pd.DataFrame:
+        """
+        Query candles_1m and return OHLCV data as a pandas DataFrame.
+
+        Parameters
+        ----------
+        instrument : str
+            Instrument symbol to filter on.
+        start : str
+            ISO-format start date (inclusive). If empty, no lower bound.
+        end : str
+            ISO-format end date (inclusive). If empty, no upper bound.
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: open, high, low, close, volume.
+            Index: DatetimeIndex (UTC) named ``timestamp``.
+        """
+        clauses = ["instrument = %s"]
+        params: list = [instrument]
+
+        if start:
+            clauses.append("timestamp >= %s")
+            params.append(pd.Timestamp(start, tz="UTC").to_pydatetime())
+        if end:
+            clauses.append("timestamp <= %s")
+            params.append(pd.Timestamp(end, tz="UTC").to_pydatetime())
+
+        where = " AND ".join(clauses)
+        sql = f"""
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles_1m
+            WHERE {where}
+            ORDER BY timestamp
+        """
+
+        conn = self._connect()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            logger.warning("No data returned for %s [%s – %s].", instrument, start, end)
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+        df = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.set_index("timestamp")
+
+        logger.info("Loaded %d bars for %s [%s – %s].", len(df), instrument, start, end)
+        return df
 
     # ------------------------------------------------------------------
     # Aggregate verification

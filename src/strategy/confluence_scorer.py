@@ -1,12 +1,12 @@
 """
 Confluence scoring system for multi-timeframe Ichimoku signals.
 
-Scores range from 0 to 8 across two categories:
+Scores range from 0 to 9 across two categories:
   - Ichimoku alignment (0–5): cloud direction, TK alignment, TK cross, Chikou, entry
-  - Confluence bonuses (0–3):  ADX trend strength, active session, zone proximity
+  - Confluence bonuses (0–4):  ADX trend strength, active session, zone proximity, divergence
 
 Quality tiers derived from total score:
-  - A+  (7–8): All conditions aligned, high confidence
+  - A+  (7–9): All conditions aligned, high confidence
   - B   (5–6): Most conditions met, moderate confidence
   - C   (4):   Minimum viable signal, low confidence
   - No trade: below 4
@@ -15,7 +15,6 @@ Quality tiers derived from total score:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .mtf_analyzer import MTFState
 
@@ -28,12 +27,13 @@ from .mtf_analyzer import MTFState
 class ConfluenceResult:
     """Output of :class:`ConfluenceScorer`."""
 
-    total_score: int          # 0–8
+    total_score: int          # 0–9
     tier: str                 # 'A+', 'B', 'C', or 'no_trade'
     ichimoku_score: int       # 0–5
     adx_bonus: bool
     session_bonus: bool
     zone_bonus: bool
+    divergence_bonus: bool = False
     breakdown: dict = field(default_factory=dict)
 
 
@@ -42,7 +42,7 @@ class ConfluenceResult:
 # ---------------------------------------------------------------------------
 
 class ConfluenceScorer:
-    """Score signal confluence on a 0–8 scale.
+    """Score signal confluence on a 0–9 scale.
 
     Ichimoku component (0–5)
     ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -52,11 +52,12 @@ class ConfluenceScorer:
     +1  15M Chikou confirmation in the signal direction
     +1  5M price near Kijun (pullback entry timing)
 
-    Confluence bonuses (0–3)
+    Confluence bonuses (0–4)
     ~~~~~~~~~~~~~~~~~~~~~~~~
     +1  ADX on 15M above ``adx_threshold`` (trending market)
     +1  Current session is London, New York, or their overlap
     +1  Price is near a significant supply/demand or S/R zone
+    +1  RSI divergence aligns with trade direction
 
     Parameters
     ----------
@@ -90,6 +91,7 @@ class ConfluenceScorer:
         mtf_state: MTFState,
         direction: str,
         zone_confluence: int = 0,
+        divergence_signal: bool = False,
     ) -> ConfluenceResult:
         """Calculate the confluence score and quality tier.
 
@@ -102,6 +104,10 @@ class ConfluenceScorer:
         zone_confluence:
             Number of nearby zones returned by the zone manager.  A value
             ≥ 1 awards the zone bonus point.
+        divergence_signal:
+            True when RSI divergence aligns with the trade direction
+            (regular bullish for longs, regular bearish for shorts).
+            Awards +1 confluence bonus.
 
         Returns
         -------
@@ -166,11 +172,20 @@ class ConfluenceScorer:
         breakdown["zone_nearby"] = zone_bonus
         breakdown["zone_count"] = zone_confluence
 
+        divergence_bonus = bool(divergence_signal)
+        breakdown["divergence_aligned"] = divergence_bonus
+
         # ------------------------------------------------------------------
         # Total and tier
         # ------------------------------------------------------------------
 
-        total_score = ichimoku_score + int(adx_bonus) + int(session_bonus) + int(zone_bonus)
+        total_score = (
+            ichimoku_score
+            + int(adx_bonus)
+            + int(session_bonus)
+            + int(zone_bonus)
+            + int(divergence_bonus)
+        )
         tier = self._tier(total_score)
 
         breakdown["ichimoku_score"] = ichimoku_score
@@ -185,6 +200,7 @@ class ConfluenceScorer:
             adx_bonus=adx_bonus,
             session_bonus=session_bonus,
             zone_bonus=zone_bonus,
+            divergence_bonus=divergence_bonus,
             breakdown=breakdown,
         )
 

@@ -20,9 +20,9 @@ from __future__ import annotations
 import base64
 import io
 import logging
-import math
-from datetime import datetime
-from typing import List, Optional
+from typing import List
+
+from src.simulation.visualizer import MCVisualizer
 
 logger = logging.getLogger(__name__)
 
@@ -391,32 +391,36 @@ class ValidationReportGenerator:
             "</table>"
         )
 
-        # Running pass-rate convergence chart.
+        # Use MCVisualizer for rich charts (equity fan + pass-rate convergence).
         try:
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            rpr = mc_result.running_pass_rates
-            if rpr:
-                fig, ax = plt.subplots(figsize=(9, 3))
-                ax.plot(range(1, len(rpr) + 1), rpr, color="#4e79a7", linewidth=0.8)
-                ax.axhline(80.0, color=_RED, linewidth=1.0, linestyle="--", label="80% threshold")
-                ax.set_xlabel("Simulation #")
-                ax.set_ylabel("Running Pass Rate (%)")
-                ax.set_title("Monte Carlo Running Pass Rate")
-                ax.legend()
-                ax.grid(alpha=0.3)
-                fig.tight_layout()
-                png_b64 = _fig_to_base64(fig)
-                plt.close(fig)
+            viz = MCVisualizer()
+
+            # Equity fan chart — shows spread of equity curve outcomes.
+            if hasattr(mc_result, "outcomes") and mc_result.outcomes:
+                fig_fan = viz.equity_fan(mc_result.outcomes, n_sample=100)
+                png_b64 = _fig_to_base64(fig_fan)
+                plt.close(fig_fan)
                 section += (
                     f'<div class="chart-container">'
-                    f'<img src="data:image/png;base64,{png_b64}" alt="MC convergence chart">'
+                    f'<img src="data:image/png;base64,{png_b64}" alt="Equity fan chart">'
                     f"</div>"
                 )
+
+            # Pass-rate convergence chart — confirms simulation count is sufficient.
+            fig_conv = viz.pass_rate_convergence(mc_result)
+            png_b64 = _fig_to_base64(fig_conv)
+            plt.close(fig_conv)
+            section += (
+                f'<div class="chart-container">'
+                f'<img src="data:image/png;base64,{png_b64}" alt="MC convergence chart">'
+                f"</div>"
+            )
         except Exception as exc:
-            logger.warning("Could not render MC chart: %s", exc)
+            logger.warning("Could not render MC charts: %s", exc)
 
         return section
 

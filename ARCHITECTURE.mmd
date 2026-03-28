@@ -1,0 +1,62 @@
+graph TD
+    %% XAU/USD Ichimoku Trading Agent — Module Dependency Graph
+
+    config[config<br/>Configuration & YAML loader]
+    database[database<br/>Schema, connection pool, ORM models]
+    data[data<br/>Dukascopy downloader & normalizer]
+    indicators[indicators<br/>Ichimoku, ADX, ATR, RSI, BB, sessions, divergence]
+    zones[zones<br/>S/R clusters, supply/demand, pivots, confluence density]
+    strategy[strategy<br/>MTF analyzer, signal engine, confluence scorer]
+    edges[edges<br/>12 toggleable edge filters + manager]
+    risk[risk<br/>Position sizer, circuit breaker, exit manager, trade manager]
+    backtesting[backtesting<br/>Event-driven backtester, metrics, prop firm tracker]
+    optimization[optimization<br/>Optuna runner, objectives, walk-forward, overfit detector]
+    simulation[simulation<br/>Monte Carlo, distributions, visualizer]
+    learning[learning<br/>Adaptive engine, embeddings, similarity, stats analyzer]
+    execution[execution<br/>MT5 bridge, order manager, account monitor, screenshot]
+    engine[engine<br/>Decision engine orchestrator, trade logger]
+    validation[validation<br/>Go/no-go, threshold checker, HTML report]
+
+    %% Core signal flow
+    config --> strategy
+    config --> edges
+    config --> risk
+    indicators --> strategy
+    zones --> strategy
+    strategy --> backtesting
+    edges --> backtesting
+    risk --> backtesting
+    learning --> backtesting
+
+    %% Engine orchestration
+    strategy --> engine
+    edges --> engine
+    risk --> engine
+    learning --> engine
+    execution --> engine
+    database --> engine
+
+    %% Optimization & validation pipeline
+    backtesting --> optimization
+    optimization --> validation
+    simulation --> validation
+
+    %% Data flow
+    data --> database
+
+    %% Learning dependencies
+    learning -.-> database
+
+    %% Simulation dependencies
+    simulation -.-> backtesting
+
+    %% Style
+    classDef core fill:#2563eb,stroke:#1d4ed8,color:#fff
+    classDef data fill:#059669,stroke:#047857,color:#fff
+    classDef infra fill:#7c3aed,stroke:#6d28d9,color:#fff
+    classDef pipeline fill:#d97706,stroke:#b45309,color:#fff
+
+    class engine,strategy,edges,risk core
+    class data,database,indicators,zones data
+    class execution,config infra
+    class backtesting,optimization,simulation,validation,learning pipeline

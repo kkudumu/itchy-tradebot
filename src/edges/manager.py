@@ -30,7 +30,7 @@ from .equity_curve import EquityCurveFilter
 
 
 # Mapping from config key → (constructor, category)
-# category: 'entry' | 'exit' | 'modifier'
+# category: 'entry' | 'exit' | 'modifier' | 'entry+modifier'
 _REGISTRY: dict[str, tuple[type[EdgeFilter], str]] = {
     "time_of_day":               (TimeOfDayFilter,                "entry"),
     "day_of_week":               (DayOfWeekFilter,                "entry"),
@@ -42,7 +42,7 @@ _REGISTRY: dict[str, tuple[type[EdgeFilter], str]] = {
     "friday_close":              (FridayCloseFilter,              "exit"),
     "time_stop":                 (TimeStopFilter,                 "exit"),
     "bb_squeeze":                (BBSqueezeAmplifier,             "modifier"),
-    "confluence_scoring":        (ConfluenceScoringFilter,        "modifier"),
+    "confluence_scoring":        (ConfluenceScoringFilter,        "entry+modifier"),
     "equity_curve":              (EquityCurveFilter,              "modifier"),
 }
 
@@ -109,7 +109,11 @@ class EdgeManager:
             edge = cls(cfg)  # type: ignore[call-arg]
             self._all_edges[key] = edge
 
-            if category == "entry":
+            if category == "entry+modifier":
+                # Dual-role: blocks below min score AND provides size modifier
+                self.entry_edges.append(edge)
+                self.modifier_edges.append(edge)
+            elif category == "entry":
                 self.entry_edges.append(edge)
             elif category == "exit":
                 self.exit_edges.append(edge)

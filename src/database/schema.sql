@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS trades (
                          CHECK (status IN ('open', 'partial', 'closed', 'cancelled')),
     confluence_score INTEGER,                 -- 0–100 composite score at entry
     signal_tier      VARCHAR(5),              -- e.g. 'A', 'B', 'C'
+    atr              DOUBLE PRECISION,        -- ATR value at entry time
+    broker_ticket    VARCHAR(50),             -- broker-assigned ticket/order ID
+    exit_reason      TEXT,                    -- reason for trade exit
     created_at       TIMESTAMPTZ      DEFAULT NOW()
 );
 
@@ -231,7 +234,48 @@ CREATE INDEX IF NOT EXISTS idx_zone_confluence_zone
     ON zone_confluence (zone_id);
 
 -- ---------------------------------------------------------------------------
--- 8. decisions
+-- 8. trade_screenshots
+--    Screenshots captured at various trade phases (pre-entry, entry, periodic,
+--    exit).  Written by EngineTradeLogger.log_screenshot().
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS trade_screenshots (
+    id          SERIAL PRIMARY KEY,
+    trade_id    INTEGER     NOT NULL,             -- broker ticket or internal trade ID
+    phase       VARCHAR(15) NOT NULL,             -- 'pre_entry', 'entry', 'periodic', 'exit'
+    filepath    TEXT        NOT NULL,             -- absolute path or URL to screenshot
+    captured_at TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_screenshots_trade
+    ON trade_screenshots (trade_id);
+
+CREATE INDEX IF NOT EXISTS idx_trade_screenshots_phase
+    ON trade_screenshots (phase);
+
+-- ---------------------------------------------------------------------------
+-- 9. zone_events
+--    Audit log of zone status transitions (e.g., active -> tested ->
+--    invalidated).  Written by EngineTradeLogger.log_zone_update().
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS zone_events (
+    id          SERIAL PRIMARY KEY,
+    zone_id     INTEGER     REFERENCES zones(id),
+    old_status  VARCHAR(15) NOT NULL,
+    new_status  VARCHAR(15) NOT NULL,
+    reason      TEXT,
+    event_time  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zone_events_zone
+    ON zone_events (zone_id);
+
+CREATE INDEX IF NOT EXISTS idx_zone_events_time
+    ON zone_events (event_time DESC);
+
+-- ---------------------------------------------------------------------------
+-- 10. decisions
 --    Every decision made by the agent (enter, skip, exit, etc.) with the
 --    full context captured as JSONB.  This provides a detailed audit trail
 --    and feeds the edge_stats materialized view.
@@ -249,6 +293,16 @@ CREATE TABLE IF NOT EXISTS decisions (
     similarity_data  JSONB,     -- nearest-neighbour results from pattern search
     confluence_score INTEGER,
     reasoning        TEXT,      -- human-readable explanation
+    executed         BOOLEAN    DEFAULT FALSE,    -- whether the decision was executed
+    execution_detail JSONB,     -- execution metadata (broker response, timing, etc.)
+    direction        VARCHAR(5),                  -- 'long' or 'short' from signal
+    entry_price      DOUBLE PRECISION,            -- signal entry price
+    stop_loss        DOUBLE PRECISION,            -- signal stop loss level
+    take_profit      DOUBLE PRECISION,            -- signal take profit level
+    signal_tier      VARCHAR(5),                  -- quality tier from signal (A/B/C)
+    atr              DOUBLE PRECISION,            -- ATR value at decision time
+    zone_context     JSONB,     -- zone context from signal
+    signal_reasoning JSONB,     -- detailed reasoning from signal engine
     created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 

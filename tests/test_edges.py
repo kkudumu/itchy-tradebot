@@ -919,9 +919,9 @@ class TestEdgeManager:
         assert "EdgeManager" in r
 
     def test_entry_edge_count(self):
-        # 7 entry edges defined in registry
+        # 8 entry edges: 7 pure entry + confluence_scoring (dual entry+modifier)
         manager = self._manager()
-        assert len(manager.entry_edges) == 7
+        assert len(manager.entry_edges) == 8
 
     def test_exit_edge_count(self):
         # 2 exit edges: friday_close, time_stop
@@ -929,7 +929,7 @@ class TestEdgeManager:
         assert len(manager.exit_edges) == 2
 
     def test_modifier_edge_count(self):
-        # 3 modifier edges: bb_squeeze, confluence_scoring, equity_curve
+        # 3 modifier edges: bb_squeeze, confluence_scoring (dual entry+modifier), equity_curve
         manager = self._manager()
         assert len(manager.modifier_edges) == 3
 
