@@ -933,9 +933,9 @@ class TestIntegrationWithRealEdgeManager:
 
     def _make_real_monitor(self) -> StrategyHealthMonitor:
         import yaml
-        with open(
-            "C:/Users/kkudu/Documents/Code/itchy-tradebot/.claude/worktrees/agent-acbf879c/config/edges.yaml"
-        ) as f:
+        import pathlib
+        _project_root = pathlib.Path(__file__).resolve().parent.parent
+        with open(_project_root / "config" / "edges.yaml") as f:
             edge_cfg = yaml.safe_load(f)
         from src.edges.manager import EdgeManager
         em = EdgeManager(edge_cfg)

@@ -76,6 +76,13 @@ class _DashboardState:
             "current_timestamp": "",
             "data_start_date": "",
             "data_end_date": "",
+            # Health monitor fields
+            "health_state": "normal",
+            "health_drought": False,
+            "health_relaxation_tier": 0,
+            "health_regime": None,
+            "health_bottleneck": None,
+            "health_message": "Not started",
         }
 
     def update(self, updates: Dict[str, Any]) -> None:

@@ -146,6 +146,25 @@ class DecisionEngine:
         self._closed_trade_count = 0
         self._last_edge_stats_refresh: Optional[datetime] = None
 
+        # Health monitor — autonomous self-awareness layer
+        self.health_monitor = None
+        if signal_engine is not None and edge_manager is not None:
+            try:
+                from src.monitoring.health_monitor import StrategyHealthMonitor
+                self.health_monitor = StrategyHealthMonitor(
+                    signal_engine=signal_engine,
+                    edge_manager=edge_manager,
+                    config=self._cfg.get("health_monitor"),
+                    mode=self._mode,
+                    drought_window=self._cfg.get("health_monitor_drought_window", 500),
+                    baseline_win_rate=self._cfg.get("baseline_win_rate", 0.55),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("StrategyHealthMonitor init failed: %s", exc)
+
+        # Bar counter for health monitor
+        self._bar_idx = 0
+
         logger.info(
             "DecisionEngine initialised — instrument=%s mode=%s interval=%dM",
             self._instrument,
@@ -283,6 +302,11 @@ class DecisionEngine:
         # Signal detected — run full pipeline
         decision = self._process_signal(signal, data, ts)
         self._log_decision(decision)
+
+        # Health monitor per-scan update
+        if self.health_monitor is not None:
+            self.health_monitor.on_bar(self._bar_idx, signal=signal)
+            self._bar_idx += 1
 
         # Periodically refresh edge stats materialized view
         self._maybe_refresh_edge_stats()
@@ -567,6 +591,9 @@ class DecisionEngine:
 
                     self.trade_logger.log_trade_exit(trade_id, {**close_data, "current_price": current_price})
                     self._closed_trade_count += 1
+                    if self.health_monitor is not None:
+                        _r = float(close_data.get("r_multiple", 0))
+                        self.health_monitor.on_trade_closed(won=_r > 0)
 
                     decisions.append(Decision(
                         timestamp=ts,
@@ -610,6 +637,9 @@ class DecisionEngine:
                         "r_multiple": exit_decision.r_multiple,
                     })
                     self._closed_trade_count += 1
+                    if self.health_monitor is not None:
+                        _r = float(getattr(exit_decision, "r_multiple", 0) or 0)
+                        self.health_monitor.on_trade_closed(won=_r > 0)
 
                     decisions.append(Decision(
                         timestamp=ts,

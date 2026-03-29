@@ -44,6 +44,7 @@ from src.risk.circuit_breaker import DailyCircuitBreaker
 from src.risk.exit_manager import ActiveTrade, HybridExitManager
 from src.risk.position_sizer import AdaptivePositionSizer
 from src.risk.trade_manager import TradeManager
+from src.monitoring.health_monitor import StrategyHealthMonitor
 from src.strategy.signal_engine import Signal, SignalEngine
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,16 @@ class IchimokuBacktester:
 
         self._metrics_calc = PerformanceMetrics()
 
+        # Health monitor — autonomous self-awareness layer
+        self.health_monitor = StrategyHealthMonitor(
+            signal_engine=self.signal_engine,
+            edge_manager=self.edge_manager,
+            config=cfg.get("health_monitor"),
+            mode="backtest",
+            drought_window=cfg.get("health_monitor_drought_window", 500),
+            baseline_win_rate=cfg.get("baseline_win_rate", 0.55),
+        )
+
     # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
@@ -313,12 +324,18 @@ class IchimokuBacktester:
                 "data_end_date": str(df_5m.index[-1]) if len(df_5m) > 0 else "",
             })
 
+        # 2.5. Pre-flight health check
+        pre_flight_result = self.health_monitor.pre_flight(candles_1m)
+        if pre_flight_result.aborted:
+            logger.error("Pre-flight ABORTED: %s", pre_flight_result.message)
+
         # 3. Main event loop over 5M bars
         for bar_idx, (ts_raw, row_5m) in enumerate(df_5m.iterrows()):
             ts = pd.Timestamp(ts_raw).to_pydatetime()
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
 
+            bar_signal: Optional[Signal] = None  # Track signal for health monitor
             current_date = ts.date()
 
             # Day rollover
@@ -381,6 +398,7 @@ class IchimokuBacktester:
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
                     self._record_learning(trade_summary, active_context, enable_learning)
+                    self.health_monitor.on_trade_closed(won=_r > 0)
                     if live_dashboard is not None:
                         self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                     if _screenshot_fn:
@@ -413,6 +431,7 @@ class IchimokuBacktester:
                         else: _n_losses += 1
                         balance = self._update_balance_from_trade(balance, trade_summary)
                         self._record_learning(trade_summary, active_context, enable_learning)
+                        self.health_monitor.on_trade_closed(won=_r > 0)
                         if live_dashboard is not None:
                             self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                         if _screenshot_fn:
@@ -447,6 +466,7 @@ class IchimokuBacktester:
 
                     if signal is not None:
                         total_signals += 1
+                        bar_signal = signal
 
                         # Build edge context for entry check
                         edge_ctx_entry = self._build_edge_context(
@@ -547,6 +567,9 @@ class IchimokuBacktester:
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
 
+            # Health monitor per-bar update
+            self.health_monitor.on_bar(bar_idx, signal=bar_signal)
+
             # Push candle data to dashboard
             if live_dashboard is not None:
                 _time_val = int(ts.timestamp())
@@ -635,6 +658,16 @@ class IchimokuBacktester:
                     "recent_trades": recent,
                     "current_timestamp": ts.isoformat(),
                 })
+                # Health monitor status overlay
+                _hs = self.health_monitor.get_status()
+                live_dashboard.update({
+                    "health_state": _hs.state.value,
+                    "health_drought": _hs.is_drought,
+                    "health_relaxation_tier": _hs.relaxation_tier,
+                    "health_regime": _hs.regime,
+                    "health_bottleneck": _hs.bottleneck_filter,
+                    "health_message": _hs.message,
+                })
 
         # ------------------------------------------------------------------
         # Force-close any trade still open at end of data
@@ -657,6 +690,7 @@ class IchimokuBacktester:
             else: _n_losses += 1
             balance = self._update_balance_from_trade(balance, trade_summary)
             self._record_learning(trade_summary, active_context, enable_learning)
+            self.health_monitor.on_trade_closed(won=_r > 0)
             if live_dashboard is not None:
                 final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
                 if final_ts.tzinfo is None:

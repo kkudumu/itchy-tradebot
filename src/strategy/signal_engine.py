@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -74,6 +74,15 @@ class Signal:
     reasoning: dict = field(default_factory=dict)
     mtf_state: Optional[MTFState] = None
     zone_context: dict = field(default_factory=dict)
+
+
+@dataclass
+class ScanResult:
+    """Result of a signal scan with per-filter diagnostics."""
+
+    signal: Optional[Signal]
+    filters: dict
+    passed_all: bool
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +142,8 @@ class SignalEngine:
         self,
         data_1m: pd.DataFrame,
         current_bar: int = -1,
-    ) -> Optional[Signal]:
+        return_scan_result: bool = False,
+    ) -> Union[Optional[Signal], ScanResult]:
         """Scan for a trade signal at the specified 1M bar.
 
         Parameters
@@ -142,12 +152,18 @@ class SignalEngine:
             1-minute OHLCV DataFrame with a UTC DatetimeIndex.
         current_bar:
             Bar index to evaluate.  -1 = latest available bar.
+        return_scan_result:
+            When True, return a ScanResult with per-filter diagnostics.
+            When False (default), return Optional[Signal] for backward
+            compatibility.
 
         Returns
         -------
-        Signal if all filters pass and confluence ≥ minimum, else None.
+        Signal | None when return_scan_result is False.
+        ScanResult when return_scan_result is True.
         """
         reasoning: dict = {}
+        filters: dict = {}
 
         # Step 1: align timeframes (applies .shift(1) on indicator cols)
         tf_data = self.mtf_analyzer.align_timeframes(data_1m)
@@ -159,22 +175,31 @@ class SignalEngine:
         # Step 2: 4H cloud direction (hard filter)
         passes_4h, direction, reason_4h = self._check_4h_filter(mtf_state.state_4h)
         reasoning["4h_filter"] = {"pass": passes_4h, "direction": direction, "reason": reason_4h}
+        filters["4h_cloud"] = {"pass": passes_4h, "reason": reason_4h}
 
         if not passes_4h:
+            if return_scan_result:
+                return ScanResult(signal=None, filters=filters, passed_all=False)
             return None
 
         # Step 3: 1H TK alignment
         passes_1h, reason_1h = self._check_1h_confirmation(mtf_state.state_1h, direction)
         reasoning["1h_confirmation"] = {"pass": passes_1h, "reason": reason_1h}
+        filters["1h_confirmation"] = {"pass": passes_1h, "reason": reason_1h}
 
         if not passes_1h:
+            if return_scan_result:
+                return ScanResult(signal=None, filters=filters, passed_all=False)
             return None
 
         # Step 4: 15M signal
         passes_15m, reason_15m = self._check_15m_signal(mtf_state.state_15m, direction)
         reasoning["15m_signal"] = {"pass": passes_15m, "reason": reason_15m}
+        filters["15m_signal"] = {"pass": passes_15m, "reason": reason_15m}
 
         if not passes_15m:
+            if return_scan_result:
+                return ScanResult(signal=None, filters=filters, passed_all=False)
             return None
 
         # Step 5: 5M entry timing
@@ -185,8 +210,11 @@ class SignalEngine:
             atr=mtf_state.atr_15m,
         )
         reasoning["5m_entry"] = {"pass": passes_5m, "reason": reason_5m}
+        filters["5m_entry"] = {"pass": passes_5m, "reason": reason_5m}
 
         if not passes_5m:
+            if return_scan_result:
+                return ScanResult(signal=None, filters=filters, passed_all=False)
             return None
 
         # Step 6: zone context
@@ -216,8 +244,11 @@ class SignalEngine:
             zone_confluence=zone_count,
         )
         reasoning["confluence"] = confluence.breakdown
+        filters["confluence"] = {"pass": confluence.tier != "no_trade", "reason": f"score={confluence.total_score}, tier={confluence.tier}"}
 
         if confluence.tier == "no_trade":
+            if return_scan_result:
+                return ScanResult(signal=None, filters=filters, passed_all=False)
             return None
 
         # Step 8: trade levels
@@ -231,7 +262,7 @@ class SignalEngine:
         )
         reasoning["levels"] = levels
 
-        return Signal(
+        signal = Signal(
             timestamp=mtf_state.timestamp,
             instrument=self.instrument,
             direction=direction,
@@ -245,6 +276,10 @@ class SignalEngine:
             mtf_state=mtf_state,
             zone_context=zone_context,
         )
+
+        if return_scan_result:
+            return ScanResult(signal=signal, filters=filters, passed_all=True)
+        return signal
 
     # ------------------------------------------------------------------
     # Filter checks — each returns (pass, reason) or (pass, direction, reason)
