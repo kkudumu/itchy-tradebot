@@ -43,6 +43,18 @@ class ConfluenceScoringFilter(EdgeFilter):
         self._b_size: float = float(params.get("tier_b_size_pct", 0.75))
         self._c_size: float = float(params.get("tier_c_size_pct", 0.50))
 
+    # ------------------------------------------------------------------
+    # Runtime setters (for adaptive relaxation)
+    # ------------------------------------------------------------------
+
+    def set_min_score(self, value: int) -> None:
+        """Set minimum confluence score at runtime (for adaptive relaxation)."""
+        self._min_score = int(value)
+
+    def get_min_score(self) -> int:
+        """Get current minimum confluence score."""
+        return self._min_score
+
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
             return EdgeResult(

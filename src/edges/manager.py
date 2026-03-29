@@ -262,6 +262,62 @@ class EdgeManager:
             )
         self._all_edges[edge_name].enabled = enabled
 
+    def get_edge(self, name: str) -> EdgeFilter:
+        """Return the EdgeFilter instance for the given edge name.
+
+        Parameters
+        ----------
+        name:
+            Registered edge key (e.g. 'regime_filter').
+
+        Raises
+        ------
+        KeyError
+            If ``name`` is not a recognised edge.
+        """
+        if name not in self._all_edges:
+            raise KeyError(
+                f"Unknown edge '{name}'. "
+                f"Available edges: {sorted(self._all_edges.keys())}"
+            )
+        return self._all_edges[name]
+
+    def set_edge_param(self, edge_name: str, param_name: str, value: Any) -> None:
+        """Call a setter method on a named edge at runtime.
+
+        Delegates to the edge's setter method named ``set_<param_name>``.
+        Used by AdaptiveRelaxer to adjust filter parameters without
+        direct access to the edge instances.
+
+        Parameters
+        ----------
+        edge_name:
+            Registered edge key (e.g. 'regime_filter').
+        param_name:
+            Parameter to set — must match a ``set_<param_name>`` method on the edge.
+        value:
+            New value to pass to the setter.
+
+        Raises
+        ------
+        KeyError
+            If ``edge_name`` is not recognised.
+        AttributeError
+            If the edge has no ``set_<param_name>`` method.
+        """
+        edge = self.get_edge(edge_name)
+        setter_name = f"set_{param_name}"
+        setter = getattr(edge, setter_name, None)
+        if setter is None:
+            raise AttributeError(
+                f"Edge '{edge_name}' has no setter '{setter_name}'. "
+                f"Available methods: {[m for m in dir(edge) if m.startswith('set_')]}"
+            )
+        if isinstance(value, (list,)):
+            setter(value)
+        else:
+            setter(value)
+
     def __repr__(self) -> str:
         enabled = self.get_enabled_edges()
         return (

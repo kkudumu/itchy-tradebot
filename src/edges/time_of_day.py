@@ -27,6 +27,19 @@ class TimeOfDayFilter(EdgeFilter):
         self._start_minutes = self._parse_time(params.get("start_utc", "08:00"))
         self._end_minutes = self._parse_time(params.get("end_utc", "17:00"))
 
+    # ------------------------------------------------------------------
+    # Runtime setters (for adaptive relaxation)
+    # ------------------------------------------------------------------
+
+    def set_window(self, start_minutes: int, end_minutes: int) -> None:
+        """Set trading window at runtime (for adaptive relaxation)."""
+        self._start_minutes = int(start_minutes)
+        self._end_minutes = int(end_minutes)
+
+    def get_window(self) -> tuple[int, int]:
+        """Get current trading window as (start_minutes, end_minutes)."""
+        return (self._start_minutes, self._end_minutes)
+
     @staticmethod
     def _parse_time(hhmm: str) -> int:
         """Convert 'HH:MM' string to minutes since midnight."""

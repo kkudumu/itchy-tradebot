@@ -31,6 +31,14 @@ class LondonOpenDelayFilter(EdgeFilter):
         h, m = hhmm.split(":")
         return int(h) * 60 + int(m)
 
+    # ------------------------------------------------------------------
+    # Runtime setters (for adaptive relaxation)
+    # ------------------------------------------------------------------
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable this filter at runtime (for adaptive relaxation)."""
+        self.enabled = enabled
+
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
             return self._disabled_result()

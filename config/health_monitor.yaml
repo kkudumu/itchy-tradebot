@@ -1,0 +1,61 @@
+health_monitor:
+  relaxation:
+    max_budget: 0.30
+    cooldown_bars: 200
+    consecutive_loss_threshold: 3
+    tighten_speed_multiplier: 3  # 3x faster than relaxation (reverts up to 3 tiers at once)
+
+    tiers:
+      - name: day_of_week
+        edge: day_of_week
+        action: set_allowed_days
+        relaxed_value: [0, 1, 2, 3, 4]   # Mon-Fri (base: Tue-Thu)
+        budget_cost: 0.05
+
+      - name: time_of_day
+        edge: time_of_day
+        action: set_window
+        relaxed_value: [360, 1140]        # 06:00-19:00 UTC (base: 08:00-17:00)
+        budget_cost: 0.08
+
+      - name: london_open_delay
+        edge: london_open_delay
+        action: disable
+        budget_cost: 0.04
+
+      - name: regime_filter
+        edge: regime_filter
+        action: set_adx_min
+        relaxed_value: 22                 # Base: 28 — loosens trend strength requirement
+        budget_cost: 0.08
+
+      - name: confluence_scoring
+        edge: confluence_scoring
+        action: set_min_score
+        relaxed_value: 3                  # Base: 4 — allows lower quality setups
+        budget_cost: 0.05
+
+    shield:
+      adx_min:
+        hard_floor: 18.0
+        hard_ceiling: 35.0
+        max_step: 3.0
+      min_score:
+        hard_floor: 2
+        hard_ceiling: 6
+        max_step: 1
+      time_start:
+        hard_floor: 300      # 05:00 UTC
+        hard_ceiling: 540    # 09:00 UTC
+        max_step: 60
+      time_end:
+        hard_floor: 960      # 16:00 UTC
+        hard_ceiling: 1260   # 21:00 UTC
+        max_step: 60
+
+  drought:
+    window_bars: 500
+
+  regime:
+    hmm_states: 3
+    retrain_interval_bars: 5000

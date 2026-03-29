@@ -48,6 +48,18 @@ class RegimeFilter(EdgeFilter):
         # if they prefer a relative comparison.
         self._cloud_min: float = float(params.get("cloud_thickness_percentile", 50))
 
+    # ------------------------------------------------------------------
+    # Runtime setters (for adaptive relaxation)
+    # ------------------------------------------------------------------
+
+    def set_adx_min(self, value: float) -> None:
+        """Set ADX minimum threshold at runtime (for adaptive relaxation)."""
+        self._adx_min = float(value)
+
+    def get_adx_min(self) -> float:
+        """Get current ADX minimum threshold."""
+        return self._adx_min
+
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
             return self._disabled_result()

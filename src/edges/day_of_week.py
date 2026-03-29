@@ -27,6 +27,18 @@ class DayOfWeekFilter(EdgeFilter):
         params = config.get("params", {})
         self._allowed_days: set[int] = set(params.get("allowed_days", [1, 2, 3]))
 
+    # ------------------------------------------------------------------
+    # Runtime setters (for adaptive relaxation)
+    # ------------------------------------------------------------------
+
+    def set_allowed_days(self, days: set[int]) -> None:
+        """Set allowed trading days at runtime (for adaptive relaxation)."""
+        self._allowed_days = set(days)
+
+    def get_allowed_days(self) -> set[int]:
+        """Get current set of allowed trading days."""
+        return set(self._allowed_days)
+
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
             return self._disabled_result()
