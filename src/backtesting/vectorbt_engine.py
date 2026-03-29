@@ -55,6 +55,15 @@ _XAUUSD_POINT_VALUE: float = 100.0
 _WARMUP_BARS: int = 60
 
 
+def _safe_float(val, default: float = 0.0) -> float:
+    """Convert to float, returning default if NaN or None."""
+    try:
+        f = float(val) if val is not None else default
+        return default if np.isnan(f) else f
+    except (TypeError, ValueError):
+        return default
+
+
 # =============================================================================
 # BacktestResult
 # =============================================================================
@@ -300,6 +309,8 @@ class IchimokuBacktester:
                 "total_bars": _total_5m_bars,
                 "initial_balance": self._initial_balance,
                 "instrument": instrument,
+                "data_start_date": str(df_5m.index[0]) if len(df_5m) > 0 else "",
+                "data_end_date": str(df_5m.index[-1]) if len(df_5m) > 0 else "",
             })
 
         # 3. Main event loop over 5M bars
@@ -370,6 +381,8 @@ class IchimokuBacktester:
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
                     self._record_learning(trade_summary, active_context, enable_learning)
+                    if live_dashboard is not None:
+                        self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                     if _screenshot_fn:
                         _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
                     active_trade_id = None
@@ -400,6 +413,8 @@ class IchimokuBacktester:
                         else: _n_losses += 1
                         balance = self._update_balance_from_trade(balance, trade_summary)
                         self._record_learning(trade_summary, active_context, enable_learning)
+                        if live_dashboard is not None:
+                            self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                         if _screenshot_fn:
                             _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
                         active_trade_id = None
@@ -532,6 +547,43 @@ class IchimokuBacktester:
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
 
+            # Push candle data to dashboard
+            if live_dashboard is not None:
+                _time_val = int(ts.timestamp())
+                live_dashboard.append_candle("5m", [
+                    _time_val,
+                    _safe_float(row_5m.get("open")),
+                    _safe_float(row_5m.get("high")),
+                    _safe_float(row_5m.get("low")),
+                    _safe_float(row_5m.get("close")),
+                    _safe_float(row_5m.get("volume", row_5m.get("tick_volume"))),
+                    _safe_float(row_5m.get("tenkan")),
+                    _safe_float(row_5m.get("kijun")),
+                    _safe_float(row_5m.get("senkou_a")),
+                    _safe_float(row_5m.get("senkou_b")),
+                    _safe_float(row_5m.get("chikou")),
+                ])
+                # Higher timeframe candle push
+                for tf_key, tf_seconds in [("15M", 900), ("1H", 3600), ("4H", 14400)]:
+                    if _time_val % tf_seconds == 0 and tf_key in tf_data:
+                        tf_df = tf_data[tf_key]
+                        mask = tf_df.index <= ts_raw
+                        if mask.any():
+                            tf_row = tf_df.loc[mask].iloc[-1]
+                            live_dashboard.append_candle(tf_key.lower(), [
+                                _time_val,
+                                _safe_float(tf_row.get("open")),
+                                _safe_float(tf_row.get("high")),
+                                _safe_float(tf_row.get("low")),
+                                _safe_float(tf_row.get("close")),
+                                _safe_float(tf_row.get("volume", tf_row.get("tick_volume"))),
+                                _safe_float(tf_row.get("tenkan")),
+                                _safe_float(tf_row.get("kijun")),
+                                _safe_float(tf_row.get("senkou_a")),
+                                _safe_float(tf_row.get("senkou_b")),
+                                _safe_float(tf_row.get("chikou")),
+                            ])
+
             # Live dashboard update (every 5 bars to avoid overhead)
             if live_dashboard is not None and bar_idx % 5 == 0:
                 if bar_idx % _sample_interval == 0:
@@ -581,6 +633,7 @@ class IchimokuBacktester:
                     "total_signals": total_signals,
                     "skipped_signals": skipped_signals,
                     "recent_trades": recent,
+                    "current_timestamp": ts.isoformat(),
                 })
 
         # ------------------------------------------------------------------
@@ -604,6 +657,11 @@ class IchimokuBacktester:
             else: _n_losses += 1
             balance = self._update_balance_from_trade(balance, trade_summary)
             self._record_learning(trade_summary, active_context, enable_learning)
+            if live_dashboard is not None:
+                final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
+                if final_ts.tzinfo is None:
+                    final_ts = final_ts.replace(tzinfo=timezone.utc)
+                self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
 
         # Signal live dashboard completion
         if live_dashboard is not None:
@@ -671,6 +729,31 @@ class IchimokuBacktester:
             skipped_signals=skipped_signals,
             total_signals=total_signals,
         )
+
+    # ------------------------------------------------------------------
+    # Dashboard trade push
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _push_trade_to_dashboard(live_dashboard, trade_summary: dict, ts: datetime, trade_id: int) -> None:
+        """Push a completed trade to the live dashboard."""
+        entry_time = trade_summary.get("entry_time", ts)
+        live_dashboard.append_trade({
+            "id": trade_id,
+            "direction": trade_summary.get("direction", ""),
+            "entry_time": int(entry_time.timestamp()) if hasattr(entry_time, "timestamp") else 0,
+            "exit_time": int(ts.timestamp()),
+            "entry_price": float(trade_summary.get("entry_price", 0)),
+            "exit_price": float(trade_summary.get("exit_price", 0)),
+            "r_multiple": float(trade_summary.get("r_multiple", 0)),
+            "pnl": float(trade_summary.get("pnl", 0)),
+            "stop_loss": float(trade_summary.get("stop_loss", 0)),
+            "take_profit": float(trade_summary.get("take_profit", 0)),
+            "reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+            "confluence_score": int(trade_summary.get("confluence_score", 0)),
+            "signal_tier": trade_summary.get("signal_tier", ""),
+            "session": trade_summary.get("session", ""),
+        })
 
     # ------------------------------------------------------------------
     # Signal scanning

@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Itchy Tradebot</title>
+<script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f0f23;
+  --card: #1a1a2e;
+  --border: #333;
+  --text: #e0e0e0;
+  --muted: #888;
+  --accent: #00d2ff;
+  --up: #26a69a;
+  --down: #ef5350;
+  --win: #00ff88;
+  --loss: #ff4444;
+  --header-h: 48px;
+  --metrics-h: 36px;
+  --gauges-h: 60px;
+  --equity-h: 88px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+#header {
+  height: var(--header-h);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 12px;
+  flex-shrink: 0;
+  z-index: 100;
+  position: relative;
+}
+
+#header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #888;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.status-dot.running { background: var(--win); animation: pulse 1.2s infinite; }
+.status-dot.done    { background: var(--accent); }
+.status-dot.error   { background: var(--loss); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+
+#status-label {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#progress-info {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex: 1;
+}
+
+#header-progress-bar {
+  flex: 1;
+  max-width: 200px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#header-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s;
+}
+
+#elapsed-label {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#phase-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #2a2a50;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  white-space: nowrap;
+}
+
+#gear-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+#gear-btn:hover { background: var(--border); }
+
+/* ── Metrics bar ─────────────────────────────────────────────── */
+#metrics-bar {
+  height: var(--metrics-h);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+}
+.metric-item:last-child { border-right: none; }
+.metric-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.metric-value { font-size: 12px; font-weight: 600; color: var(--text); }
+.metric-value.pos { color: var(--win); }
+.metric-value.neg { color: var(--loss); }
+
+/* ── Main layout ─────────────────────────────────────────────── */
+#main-layout {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--header-h) - var(--metrics-h));
+  overflow: hidden;
+}
+
+/* ── Chart wrapper ───────────────────────────────────────────── */
+#chart-wrapper {
+  position: relative;
+  flex: 1 1 60%;
+  min-height: 200px;
+  overflow: hidden;
+}
+
+#chart-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Timeframe buttons overlay */
+#tf-buttons {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+}
+
+.tf-btn {
+  background: rgba(26,26,46,0.85);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.15s;
+  backdrop-filter: blur(4px);
+}
+.tf-btn:hover { border-color: var(--accent); color: var(--text); }
+.tf-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,210,255,0.1); }
+
+/* Auto-follow button */
+#follow-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  background: rgba(26,26,46,0.85);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  display: none;
+  backdrop-filter: blur(4px);
+}
+#follow-btn:hover { background: rgba(0,210,255,0.15); }
+
+/* ── Prop firm gauges ────────────────────────────────────────── */
+#gauges-row {
+  height: var(--gauges-h);
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.gauge {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gauge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.gauge-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.gauge-pct { font-size: 11px; font-weight: 700; }
+.gauge-bar {
+  height: 6px;
+  background: #2a2a40;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.gauge.profit .gauge-fill { background: var(--win); }
+.gauge.daily-dd .gauge-fill { background: #f39c12; }
+.gauge.total-dd .gauge-fill { background: var(--loss); }
+
+.gauge-status {
+  font-size: 9px;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* ── Equity canvas row ───────────────────────────────────────── */
+#equity-row {
+  height: var(--equity-h);
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+#equity-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 90px;
+}
+.eq-label { font-size: 9px; color: var(--muted); text-transform: uppercase; }
+#equity-value { font-size: 14px; font-weight: 700; color: var(--text); }
+#equity-return { font-size: 11px; font-weight: 600; }
+
+#equity-canvas {
+  flex: 1;
+  height: 68px;
+  border-radius: 3px;
+}
+
+/* ── Trade panel ─────────────────────────────────────────────── */
+#trade-panel {
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+  flex-shrink: 0;
+  position: relative;
+  min-height: 80px;
+  max-height: 50vh;
+}
+
+#trade-panel-resizer {
+  height: 5px;
+  cursor: ns-resize;
+  background: transparent;
+  border-top: 1px solid var(--border);
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+}
+#trade-panel-resizer:hover { background: var(--accent); opacity: 0.3; }
+
+#trade-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 28px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  flex-shrink: 0;
+}
+#trade-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#trade-count-badge {
+  font-size: 10px;
+  background: #2a2a40;
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.panel-spacer { flex: 1; }
+#trade-nav-info {
+  font-size: 10px;
+  color: var(--muted);
+}
+#collapse-trades-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+}
+#collapse-trades-btn:hover { color: var(--text); }
+
+#trade-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Trade list */
+#trade-list-container {
+  flex: 6;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--border);
+}
+#trade-list-container::-webkit-scrollbar { width: 5px; }
+#trade-list-container::-webkit-scrollbar-track { background: var(--bg); }
+#trade-list-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+#trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+#trade-table th {
+  position: sticky;
+  top: 0;
+  background: #1a1a2e;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: 10px;
+  z-index: 1;
+}
+#trade-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(51,51,51,0.5);
+  white-space: nowrap;
+}
+#trade-table tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+#trade-table tr:hover td { background: rgba(255,255,255,0.04); }
+#trade-table tr.selected td { background: rgba(0,210,255,0.1); }
+.dir-long  { color: var(--win); font-weight: 600; }
+.dir-short { color: var(--loss); font-weight: 600; }
+.r-win  { color: var(--win); font-weight: 700; }
+.r-loss { color: var(--loss); font-weight: 700; }
+.r-be   { color: var(--muted); font-weight: 600; }
+
+/* Trade detail */
+#trade-detail {
+  flex: 4;
+  padding: 10px 12px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+#trade-detail h3 {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.detail-key { color: var(--muted); }
+.detail-val { color: var(--text); font-weight: 600; }
+.detail-val.pos { color: var(--win); }
+.detail-val.neg { color: var(--loss); }
+
+/* ── Settings panel ──────────────────────────────────────────── */
+#settings-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 200;
+}
+#settings-overlay.open { display: block; }
+
+#settings-panel {
+  position: fixed;
+  top: 0; right: -360px;
+  width: 350px;
+  height: 100vh;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.25s ease;
+  overflow: hidden;
+}
+#settings-panel.open { right: 0; }
+
+#settings-header {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  height: 48px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#settings-header h2 { font-size: 14px; font-weight: 700; flex: 1; color: var(--text); }
+#settings-close-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px;
+}
+#settings-close-btn:hover { color: var(--text); }
+
+#settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+#settings-body::-webkit-scrollbar { width: 5px; }
+#settings-body::-webkit-scrollbar-track { background: var(--bg); }
+#settings-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+#settings-footer {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.settings-section {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  background: #20203a;
+  cursor: pointer;
+  user-select: none;
+  gap: 6px;
+}
+.settings-section-header h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.settings-section-header .section-toggle-arrow {
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.2s;
+}
+.settings-section-header.collapsed .section-toggle-arrow { transform: rotate(-90deg); }
+.settings-section-content { padding: 8px 10px; }
+.settings-section-content.hidden { display: none; }
+
+/* Edge toggle row */
+.edge-item {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.edge-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  background: #16162c;
+  gap: 8px;
+}
+.edge-name {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.edge-expand-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
+}
+.edge-params {
+  padding: 6px 8px;
+  background: #0f0f1e;
+  display: none;
+}
+.edge-params.open { display: block; }
+
+/* Switch toggle */
+.toggle-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #333;
+  border-radius: 9px;
+  transition: 0.2s;
+}
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 12px; width: 12px;
+  left: 3px; bottom: 3px;
+  background: #888;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: #0a3a2a; }
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(14px);
+  background: var(--win);
+}
+
+/* Param inputs */
+.param-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 6px;
+}
+.param-label {
+  flex: 1;
+  font-size: 10px;
+  color: var(--muted);
+}
+.param-input {
+  width: 80px;
+  background: #1a1a30;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-align: right;
+}
+.param-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.apply-btn {
+  background: rgba(0,210,255,0.1);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  width: 100%;
+  margin-top: 4px;
+}
+.apply-btn:hover { background: rgba(0,210,255,0.2); }
+
+#save-config-btn {
+  width: 100%;
+  background: rgba(0,210,255,0.1);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+#save-config-btn:hover { background: rgba(0,210,255,0.2); }
+
+#config-status {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 6px;
+}
+
+/* ── Notifications ───────────────────────────────────────────── */
+#notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  z-index: 500;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+#notification.show { opacity: 1; }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div id="header">
+  <div class="status-dot" id="status-dot"></div>
+  <h1>Itchy Tradebot</h1>
+  <span id="status-label">Idle</span>
+  <div id="header-progress-bar"><div id="header-progress-fill"></div></div>
+  <span id="progress-info">0 / 0 bars</span>
+  <span id="elapsed-label">0s</span>
+  <span id="phase-badge">mechanical</span>
+  <button id="gear-btn" title="Settings (S)">&#9881;</button>
+</div>
+
+<!-- ── Metrics bar ─────────────────────────────────────────────── -->
+<div id="metrics-bar">
+  <div class="metric-item">
+    <span class="metric-label">Win Rate</span>
+    <span class="metric-value" id="m-winrate">0.0%</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Sharpe</span>
+    <span class="metric-value" id="m-sharpe">0.00</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Max DD</span>
+    <span class="metric-value" id="m-maxdd">0.0%</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Expectancy</span>
+    <span class="metric-value" id="m-expectancy">0.00R</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Return</span>
+    <span class="metric-value" id="m-return">0.0%</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Trades</span>
+    <span class="metric-value" id="m-trades">0</span>
+  </div>
+  <div class="metric-item">
+    <span class="metric-label">Signals</span>
+    <span class="metric-value" id="m-signals">0/0</span>
+  </div>
+</div>
+
+<!-- ── Main layout ────────────────────────────────────────────── -->
+<div id="main-layout">
+
+  <!-- Chart wrapper -->
+  <div id="chart-wrapper">
+    <div id="chart-container"></div>
+    <div id="tf-buttons">
+      <button class="tf-btn active" data-tf="5m">5M</button>
+      <button class="tf-btn" data-tf="15m">15M</button>
+      <button class="tf-btn" data-tf="1h">1H</button>
+      <button class="tf-btn" data-tf="4h">4H</button>
+    </div>
+    <button id="follow-btn" title="Resume auto-follow">&#9654; Follow</button>
+  </div>
+
+  <!-- Prop firm gauges -->
+  <div id="gauges-row">
+    <div class="gauge profit">
+      <div class="gauge-header">
+        <span class="gauge-label">Profit Target</span>
+        <span class="gauge-pct" id="gauge-profit-pct" style="color:var(--win)">0.0%</span>
+      </div>
+      <div class="gauge-bar"><div class="gauge-fill" id="gauge-profit-fill" style="width:0%"></div></div>
+      <div class="gauge-status">Target: 8%</div>
+    </div>
+    <div class="gauge daily-dd">
+      <div class="gauge-header">
+        <span class="gauge-label">Daily DD</span>
+        <span class="gauge-pct" id="gauge-daily-pct" style="color:#f39c12">0.0%</span>
+      </div>
+      <div class="gauge-bar"><div class="gauge-fill" id="gauge-daily-fill" style="width:0%"></div></div>
+      <div class="gauge-status">Limit: 5%</div>
+    </div>
+    <div class="gauge total-dd">
+      <div class="gauge-header">
+        <span class="gauge-label">Total DD</span>
+        <span class="gauge-pct" id="gauge-total-pct" style="color:var(--loss)">0.0%</span>
+      </div>
+      <div class="gauge-bar"><div class="gauge-fill" id="gauge-total-fill" style="width:0%"></div></div>
+      <div class="gauge-status" id="gauge-prop-status">active</div>
+    </div>
+  </div>
+
+  <!-- Equity row -->
+  <div id="equity-row">
+    <div id="equity-labels">
+      <span class="eq-label">Equity</span>
+      <span id="equity-value">$10,000</span>
+      <span id="equity-return" class="r-be">+0.00%</span>
+    </div>
+    <canvas id="equity-canvas"></canvas>
+  </div>
+
+  <!-- Trade panel -->
+  <div id="trade-panel">
+    <div id="trade-panel-resizer"></div>
+    <div id="trade-panel-header">
+      <span id="trade-panel-title">Trades</span>
+      <span id="trade-count-badge">0</span>
+      <span class="panel-spacer"></span>
+      <span id="trade-nav-info"></span>
+      <button id="collapse-trades-btn" title="Toggle (T)">&#9660;</button>
+    </div>
+    <div id="trade-body">
+      <div id="trade-list-container">
+        <table id="trade-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Dir</th>
+              <th>Entry Time</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>R</th>
+              <th>PnL</th>
+              <th>Session</th>
+            </tr>
+          </thead>
+          <tbody id="trade-tbody"></tbody>
+        </table>
+      </div>
+      <div id="trade-detail"><span style="color:var(--muted);font-size:11px">Select a trade to see details</span></div>
+    </div>
+  </div>
+
+</div><!-- end main-layout -->
+
+<!-- ── Settings panel ─────────────────────────────────────────── -->
+<div id="settings-overlay"></div>
+<div id="settings-panel">
+  <div id="settings-header">
+    <h2>Settings</h2>
+    <button id="settings-close-btn">&times;</button>
+  </div>
+  <div id="settings-body">
+    <div id="edges-section" class="settings-section">
+      <div class="settings-section-header" data-target="edges-content">
+        <h3>Edges</h3>
+        <span class="section-toggle-arrow">&#9660;</span>
+      </div>
+      <div id="edges-content" class="settings-section-content">
+        <div id="edges-list"><em style="color:var(--muted);font-size:11px">Loading...</em></div>
+      </div>
+    </div>
+    <div id="strategy-sections-container"></div>
+  </div>
+  <div id="settings-footer">
+    <button id="save-config-btn">&#128190; Save to Disk</button>
+    <div id="config-status"></div>
+  </div>
+</div>
+
+<!-- ── Notification toast ─────────────────────────────────────── -->
+<div id="notification"></div>
+
+<script>
+'use strict';
+
+// ================================================================
+// State
+// ================================================================
+const { createChart, CandlestickSeries, LineSeries } = LightweightCharts;
+
+const state = {
+  running: false,
+  done: false,
+  equity: 10000,
+  initialBalance: 10000,
+  equityHistory: [],
+  trades: [],
+  selectedTradeIdx: -1,
+  following: true,
+  currentTf: '5m',
+  candleSince: { '5m': 0, '15m': 0, '1h': 0, '4h': 0 },
+  tradeSince: 0,
+  candleData: { '5m': [], '15m': [], '1h': [], '4h': [] },
+  propStatus: 'active',
+};
+
+// ================================================================
+// Chart setup
+// ================================================================
+const chartContainer = document.getElementById('chart-container');
+const chart = createChart(chartContainer, {
+  layout: {
+    background: { color: '#0f0f23' },
+    textColor: '#888',
+    fontSize: 11,
+  },
+  grid: {
+    vertLines: { color: '#1e1e35' },
+    horzLines: { color: '#1e1e35' },
+  },
+  crosshair: {
+    vertLine: { color: '#444', width: 1, style: 3 },
+    horzLine: { color: '#444', width: 1, style: 3 },
+  },
+  rightPriceScale: {
+    borderColor: '#333',
+    scaleMargins: { top: 0.1, bottom: 0.1 },
+  },
+  timeScale: {
+    borderColor: '#333',
+    timeVisible: true,
+    secondsVisible: false,
+  },
+  handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
+  handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+});
+
+// Series
+const candleSeries = chart.addSeries(CandlestickSeries, {
+  upColor: '#26a69a',
+  downColor: '#ef5350',
+  borderVisible: false,
+  wickUpColor: '#26a69a',
+  wickDownColor: '#ef5350',
+});
+
+const tenkanSeries = chart.addSeries(LineSeries, {
+  color: '#e74c3c',
+  lineWidth: 1,
+  lastValueVisible: false,
+  priceLineVisible: false,
+});
+
+const kijunSeries = chart.addSeries(LineSeries, {
+  color: '#3498db',
+  lineWidth: 1,
+  lastValueVisible: false,
+  priceLineVisible: false,
+});
+
+const chikouSeries = chart.addSeries(LineSeries, {
+  color: '#2ecc71',
+  lineWidth: 1,
+  lineStyle: 2, // dotted
+  lastValueVisible: false,
+  priceLineVisible: false,
+});
+
+const senkouASeries = chart.addSeries(LineSeries, {
+  color: 'rgba(38,166,154,0.5)',
+  lineWidth: 1,
+  lastValueVisible: false,
+  priceLineVisible: false,
+});
+
+const senkouBSeries = chart.addSeries(LineSeries, {
+  color: 'rgba(239,83,80,0.5)',
+  lineWidth: 1,
+  lastValueVisible: false,
+  priceLineVisible: false,
+});
+
+// ── Ichimoku Cloud Primitive ─────────────────────────────────────
+class IchimokuCloudPrimitive {
+  constructor() {
+    this._senkouA = [];
+    this._senkouB = [];
+    this._paneViews = [new IchimokuCloudPaneView(this)];
+  }
+  updateData(senkouA, senkouB) {
+    this._senkouA = senkouA;
+    this._senkouB = senkouB;
+  }
+  paneViews() { return this._paneViews; }
+  priceAxisViews() { return []; }
+  timeAxisViews() { return []; }
+}
+
+class IchimokuCloudPaneView {
+  constructor(primitive) { this._primitive = primitive; }
+  zOrder() { return 'bottom'; }
+  renderer() {
+    return {
+      draw: (target) => {
+        const primitive = this._primitive;
+        if (primitive._senkouA.length === 0 || primitive._senkouB.length === 0) return;
+        target.useBitmapCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          const timeScale = chart.timeScale();
+          const priceScale = candleSeries.priceToCoordinate.bind(candleSeries);
+
+          const pairsA = primitive._senkouA.filter(p => p.value !== null && p.value !== undefined);
+          const pairsB = primitive._senkouB.filter(p => p.value !== null && p.value !== undefined);
+          if (pairsA.length < 2 || pairsB.length < 2) return;
+
+          // Build matched pairs by time
+          const aByTime = new Map(pairsA.map(p => [p.time, p.value]));
+          const bByTime = new Map(pairsB.map(p => [p.time, p.value]));
+          const times = [...aByTime.keys()].filter(t => bByTime.has(t)).sort((a, b) => a - b);
+          if (times.length < 2) return;
+
+          ctx.save();
+          const pr = scope.pixelRatio;
+
+          // Draw green cloud (A > B)
+          ctx.beginPath();
+          let firstGreen = true;
+          const greenTimes = times.filter(t => aByTime.get(t) >= bByTime.get(t));
+          if (greenTimes.length > 1) {
+            for (let i = 0; i < greenTimes.length; i++) {
+              const t = greenTimes[i];
+              const x = timeScale.timeToCoordinate(t);
+              const y = priceScale(aByTime.get(t));
+              if (x === null || y === null) continue;
+              if (firstGreen) { ctx.moveTo(x * pr, y * pr); firstGreen = false; }
+              else ctx.lineTo(x * pr, y * pr);
+            }
+            for (let i = greenTimes.length - 1; i >= 0; i--) {
+              const t = greenTimes[i];
+              const x = timeScale.timeToCoordinate(t);
+              const y = priceScale(bByTime.get(t));
+              if (x === null || y === null) continue;
+              ctx.lineTo(x * pr, y * pr);
+            }
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(38,166,154,0.12)';
+            ctx.fill();
+          }
+
+          // Draw red cloud (B > A)
+          ctx.beginPath();
+          let firstRed = true;
+          const redTimes = times.filter(t => bByTime.get(t) > aByTime.get(t));
+          if (redTimes.length > 1) {
+            for (let i = 0; i < redTimes.length; i++) {
+              const t = redTimes[i];
+              const x = timeScale.timeToCoordinate(t);
+              const y = priceScale(bByTime.get(t));
+              if (x === null || y === null) continue;
+              if (firstRed) { ctx.moveTo(x * pr, y * pr); firstRed = false; }
+              else ctx.lineTo(x * pr, y * pr);
+            }
+            for (let i = redTimes.length - 1; i >= 0; i--) {
+              const t = redTimes[i];
+              const x = timeScale.timeToCoordinate(t);
+              const y = priceScale(aByTime.get(t));
+              if (x === null || y === null) continue;
+              ctx.lineTo(x * pr, y * pr);
+            }
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(239,83,80,0.12)';
+            ctx.fill();
+          }
+          ctx.restore();
+        });
+      }
+    };
+  }
+}
+
+const cloudPrimitive = new IchimokuCloudPrimitive();
+candleSeries.attachPrimitive(cloudPrimitive);
+
+// ── Trade Zone Primitive ──────────────────────────────────────────
+class TradeZonePrimitive {
+  constructor() {
+    this._zones = [];
+    this._paneViews = [new TradeZonePaneView(this)];
+  }
+  setZones(zones) { this._zones = zones; }
+  paneViews() { return this._paneViews; }
+  priceAxisViews() { return []; }
+  timeAxisViews() { return []; }
+}
+
+class TradeZonePaneView {
+  constructor(primitive) { this._primitive = primitive; }
+  zOrder() { return 'bottom'; }
+  renderer() {
+    return {
+      draw: (target) => {
+        const zones = this._primitive._zones;
+        if (!zones || zones.length === 0) return;
+        target.useBitmapCoordinateSpace((scope) => {
+          const ctx = scope.context;
+          const pr = scope.pixelRatio;
+          const timeScale = chart.timeScale();
+          const priceScale = candleSeries.priceToCoordinate.bind(candleSeries);
+          ctx.save();
+          for (const z of zones) {
+            const x1 = timeScale.timeToCoordinate(z.entryTime);
+            const x2 = timeScale.timeToCoordinate(z.exitTime);
+            const y1 = priceScale(Math.max(z.entryPrice, z.exitPrice));
+            const y2 = priceScale(Math.min(z.entryPrice, z.exitPrice));
+            if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
+            const xL = Math.min(x1, x2) * pr;
+            const xR = Math.max(x1, x2) * pr;
+            const yT = Math.min(y1, y2) * pr;
+            const yB = Math.max(y1, y2) * pr;
+            ctx.fillStyle = z.win
+              ? 'rgba(0,255,136,0.06)'
+              : 'rgba(255,68,68,0.06)';
+            ctx.fillRect(xL, yT, xR - xL, yB - yT);
+            ctx.strokeStyle = z.win
+              ? 'rgba(0,255,136,0.25)'
+              : 'rgba(255,68,68,0.25)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(xL, yT, xR - xL, yB - yT);
+          }
+          ctx.restore();
+        });
+      }
+    };
+  }
+}
+
+const tradeZonePrimitive = new TradeZonePrimitive();
+candleSeries.attachPrimitive(tradeZonePrimitive);
+
+// Series markers via createSeriesMarkers
+let seriesMarkers = null;
+
+function rebuildMarkers() {
+  const markers = [];
+  for (const t of state.trades) {
+    if (!t.entry_time) continue;
+    const entryTs = toUnixSeconds(t.entry_time);
+    if (entryTs) {
+      markers.push({
+        time: entryTs,
+        position: t.direction === 'long' ? 'belowBar' : 'aboveBar',
+        color: t.direction === 'long' ? '#00ff88' : '#ff4444',
+        shape: t.direction === 'long' ? 'arrowUp' : 'arrowDown',
+        text: t.direction === 'long' ? 'L' : 'S',
+        size: 1,
+      });
+    }
+    if (t.exit_time) {
+      const exitTs = toUnixSeconds(t.exit_time);
+      const r = parseFloat(t.r_multiple) || 0;
+      if (exitTs) {
+        markers.push({
+          time: exitTs,
+          position: t.direction === 'long' ? 'aboveBar' : 'belowBar',
+          color: r >= 0 ? '#00ff88' : '#ff4444',
+          shape: 'circle',
+          text: r.toFixed(1) + 'R',
+          size: 0.8,
+        });
+      }
+    }
+  }
+  markers.sort((a, b) => a.time - b.time);
+  if (seriesMarkers) {
+    seriesMarkers.setMarkers(markers);
+  } else {
+    seriesMarkers = LightweightCharts.createSeriesMarkers(candleSeries, markers);
+  }
+}
+
+function rebuildZones() {
+  const zones = state.trades
+    .filter(t => t.entry_time && t.exit_time && t.entry_price != null && t.exit_price != null)
+    .map(t => ({
+      entryTime: toUnixSeconds(t.entry_time),
+      exitTime: toUnixSeconds(t.exit_time),
+      entryPrice: parseFloat(t.entry_price),
+      exitPrice: parseFloat(t.exit_price),
+      win: (parseFloat(t.r_multiple) || 0) >= 0,
+    }))
+    .filter(z => z.entryTime && z.exitTime);
+  tradeZonePrimitive.setZones(zones);
+}
+
+// SL/TP price lines for selected trade
+let slPriceLine = null;
+let tpPriceLine = null;
+
+function clearSLTP() {
+  if (slPriceLine) { try { candleSeries.removePriceLine(slPriceLine); } catch(e){} slPriceLine = null; }
+  if (tpPriceLine) { try { candleSeries.removePriceLine(tpPriceLine); } catch(e){} tpPriceLine = null; }
+}
+
+function showSLTP(trade) {
+  clearSLTP();
+  if (trade.stop_loss != null) {
+    slPriceLine = candleSeries.createPriceLine({
+      price: parseFloat(trade.stop_loss),
+      color: '#ff4444',
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: 'SL',
+    });
+  }
+  if (trade.take_profit != null) {
+    tpPriceLine = candleSeries.createPriceLine({
+      price: parseFloat(trade.take_profit),
+      color: '#00ff88',
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: 'TP',
+    });
+  }
+}
+
+// ================================================================
+// Chart resize
+// ================================================================
+function resizeChart() {
+  const rect = chartContainer.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    chart.resize(rect.width, rect.height);
+  }
+}
+
+const resizeObserver = new ResizeObserver(() => resizeChart());
+resizeObserver.observe(chartContainer);
+resizeChart();
+
+// Detect user scroll/pan to pause auto-follow
+chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+  if (!state.following) return;
+  // we'll manage this via explicit navigation
+});
+
+// ================================================================
+// Candle data management
+// ================================================================
+function buildSeriesData(candles) {
+  const cs = [], tenkan = [], kijun = [], chikou = [], sA = [], sB = [];
+  for (const c of candles) {
+    const t = c[0]; // unix seconds
+    if (!t) continue;
+    cs.push({ time: t, open: c[1], high: c[2], low: c[3], close: c[4] });
+    if (c[6] != null && c[6] !== 0) tenkan.push({ time: t, value: c[6] });
+    if (c[7] != null && c[7] !== 0) kijun.push({ time: t, value: c[7] });
+    if (c[8] != null && c[8] !== 0) sA.push({ time: t, value: c[8] });
+    if (c[9] != null && c[9] !== 0) sB.push({ time: t, value: c[9] });
+    if (c[10] != null && c[10] !== 0) chikou.push({ time: t, value: c[10] });
+  }
+  return { cs, tenkan, kijun, chikou, sA, sB };
+}
+
+function applyChartData(candles) {
+  if (!candles || candles.length === 0) return;
+  const { cs, tenkan, kijun, chikou, sA, sB } = buildSeriesData(candles);
+
+  if (cs.length > 0) candleSeries.setData(cs);
+  if (tenkan.length > 0) tenkanSeries.setData(tenkan);
+  if (kijun.length > 0) kijunSeries.setData(kijun);
+  if (chikou.length > 0) chikouSeries.setData(chikou);
+  if (sA.length > 0) senkouASeries.setData(sA);
+  if (sB.length > 0) senkouBSeries.setData(sB);
+  cloudPrimitive.updateData(sA, sB);
+}
+
+function updateChartIncrementally(newCandles) {
+  if (!newCandles || newCandles.length === 0) return;
+  const { cs, tenkan, kijun, chikou, sA, sB } = buildSeriesData(newCandles);
+  for (const bar of cs) candleSeries.update(bar);
+  for (const bar of tenkan) tenkanSeries.update(bar);
+  for (const bar of kijun) kijunSeries.update(bar);
+  for (const bar of chikou) chikouSeries.update(bar);
+  for (const bar of sA) senkouASeries.update(bar);
+  for (const bar of sB) senkouBSeries.update(bar);
+
+  // Rebuild cloud data from full set
+  const allA = state.candleData[state.currentTf]
+    .filter(c => c[8] != null && c[8] !== 0)
+    .map(c => ({ time: c[0], value: c[8] }));
+  const allB = state.candleData[state.currentTf]
+    .filter(c => c[9] != null && c[9] !== 0)
+    .map(c => ({ time: c[0], value: c[9] }));
+  cloudPrimitive.updateData(allA, allB);
+}
+
+// ================================================================
+// Equity canvas
+// ================================================================
+const equityCanvas = document.getElementById('equity-canvas');
+const equityCtx = equityCanvas.getContext('2d');
+
+function drawEquityCurve(history) {
+  const w = equityCanvas.offsetWidth || equityCanvas.parentElement.clientWidth - 110;
+  const h = 68;
+  equityCanvas.width = w * window.devicePixelRatio;
+  equityCanvas.height = h * window.devicePixelRatio;
+  equityCanvas.style.width = w + 'px';
+  equityCanvas.style.height = h + 'px';
+  const ctx = equityCtx;
+  const pr = window.devicePixelRatio;
+  ctx.clearRect(0, 0, w * pr, h * pr);
+
+  if (!history || history.length < 2) return;
+
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+  const pad = 4 * pr;
+
+  // gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, h * pr);
+  const isPos = history[history.length - 1] >= history[0];
+  grad.addColorStop(0, isPos ? 'rgba(0,255,136,0.3)' : 'rgba(255,68,68,0.3)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  for (let i = 0; i < history.length; i++) {
+    const x = pad + (i / (history.length - 1)) * (w * pr - pad * 2);
+    const y = pad + (1 - (history[i] - min) / range) * (h * pr - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+
+  // Fill
+  const lastX = pad + (w * pr - pad * 2);
+  const lastY = pad + (1 - (history[history.length - 1] - min) / range) * (h * pr - pad * 2);
+  ctx.lineTo(lastX, h * pr);
+  ctx.lineTo(pad, h * pr);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  for (let i = 0; i < history.length; i++) {
+    const x = pad + (i / (history.length - 1)) * (w * pr - pad * 2);
+    const y = pad + (1 - (history[i] - min) / range) * (h * pr - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = isPos ? '#00ff88' : '#ff4444';
+  ctx.lineWidth = 1.5 * pr;
+  ctx.stroke();
+}
+
+// ================================================================
+// UI Updates
+// ================================================================
+function updateMetricsBar(s) {
+  const wr = ((s.win_rate || 0) * 100).toFixed(1);
+  const sh = (s.sharpe || 0).toFixed(2);
+  const dd = (s.max_dd_pct || 0).toFixed(1);
+  const exp = (s.expectancy || 0).toFixed(2);
+  const ret = (s.total_return_pct || 0).toFixed(2);
+
+  setMetric('m-winrate', wr + '%', parseFloat(wr) >= 50);
+  setMetric('m-sharpe', sh, parseFloat(sh) >= 1);
+  setMetric('m-maxdd', dd + '%', false, true);
+  setMetric('m-expectancy', exp + 'R', parseFloat(exp) >= 0);
+  setMetric('m-return', ret + '%', parseFloat(ret) >= 0);
+  document.getElementById('m-trades').textContent = s.n_trades || 0;
+  document.getElementById('m-signals').textContent =
+    `${s.total_signals || 0}/${s.skipped_signals || 0}`;
+}
+
+function setMetric(id, val, isPos, isNeg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = val;
+  el.className = 'metric-value';
+  if (isNeg) el.classList.add('neg');
+  else if (isPos) el.classList.add('pos');
+}
+
+function updateHeader(s) {
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('status-label');
+  dot.className = 'status-dot';
+  if (s.done) {
+    dot.classList.add('done');
+    label.textContent = 'Done';
+  } else if (s.running) {
+    dot.classList.add('running');
+    label.textContent = 'Running';
+  } else {
+    label.textContent = 'Idle';
+  }
+
+  const pct = Math.min(100, s.pct_complete || 0);
+  document.getElementById('header-progress-fill').style.width = pct + '%';
+  document.getElementById('progress-info').textContent =
+    `${(s.bar_index || 0).toLocaleString()} / ${(s.total_bars || 0).toLocaleString()} bars`;
+
+  const elapsed = s.elapsed_seconds || 0;
+  document.getElementById('elapsed-label').textContent =
+    elapsed < 60 ? `${elapsed.toFixed(0)}s` : `${(elapsed / 60).toFixed(1)}m`;
+
+  document.getElementById('phase-badge').textContent = s.learning_phase || 'mechanical';
+}
+
+function updateGauges(s) {
+  const profit = Math.min(100, Math.max(0, (s.prop_profit_pct || 0) / 8 * 100));
+  const daily = Math.min(100, Math.max(0, (s.worst_daily_dd_pct || 0) / 5 * 100));
+  const total = Math.min(100, Math.max(0, (s.max_dd_pct || 0) / 10 * 100));
+
+  document.getElementById('gauge-profit-pct').textContent = (s.prop_profit_pct || 0).toFixed(2) + '%';
+  document.getElementById('gauge-daily-pct').textContent = (s.worst_daily_dd_pct || 0).toFixed(2) + '%';
+  document.getElementById('gauge-total-pct').textContent = (s.max_dd_pct || 0).toFixed(2) + '%';
+
+  document.getElementById('gauge-profit-fill').style.width = profit + '%';
+  document.getElementById('gauge-daily-fill').style.width = daily + '%';
+  document.getElementById('gauge-total-fill').style.width = total + '%';
+
+  const statusEl = document.getElementById('gauge-prop-status');
+  statusEl.textContent = s.prop_status || 'active';
+  statusEl.style.color = s.prop_status === 'passed' ? 'var(--win)'
+    : s.prop_status === 'failed' ? 'var(--loss)' : 'var(--muted)';
+}
+
+function updateEquityPanel(s) {
+  const eq = s.equity || 0;
+  const init = s.initial_balance || 10000;
+  const ret = ((eq - init) / init * 100);
+  document.getElementById('equity-value').textContent = '$' + eq.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const retEl = document.getElementById('equity-return');
+  retEl.textContent = (ret >= 0 ? '+' : '') + ret.toFixed(2) + '%';
+  retEl.className = ret >= 0 ? 'r-win' : 'r-loss';
+  drawEquityCurve(s.equity_history || []);
+}
+
+// ================================================================
+// Trade panel
+// ================================================================
+let tradePanelVisible = true;
+
+function toggleTradePanel() {
+  tradePanelVisible = !tradePanelVisible;
+  const panel = document.getElementById('trade-panel');
+  const btn = document.getElementById('collapse-trades-btn');
+  if (tradePanelVisible) {
+    panel.style.height = '200px';
+    btn.innerHTML = '&#9660;';
+  } else {
+    panel.style.height = '28px';
+    btn.innerHTML = '&#9650;';
+  }
+}
+
+function renderTradeTable() {
+  const tbody = document.getElementById('trade-tbody');
+  const trades = state.trades;
+  document.getElementById('trade-count-badge').textContent = trades.length;
+
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i < trades.length; i++) {
+    const t = trades[i];
+    const tr = document.createElement('tr');
+    if (i === state.selectedTradeIdx) tr.classList.add('selected');
+    tr.dataset.idx = i;
+    const r = parseFloat(t.r_multiple) || 0;
+    const rClass = r > 0.05 ? 'r-win' : r < -0.05 ? 'r-loss' : 'r-be';
+    const dirClass = t.direction === 'long' ? 'dir-long' : 'dir-short';
+    const entryTime = formatTime(t.entry_time);
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td class="${dirClass}">${(t.direction || '?').toUpperCase()[0]}</td>
+      <td>${entryTime}</td>
+      <td>${fmtPrice(t.entry_price)}</td>
+      <td>${fmtPrice(t.exit_price)}</td>
+      <td class="${rClass}">${r.toFixed(2)}R</td>
+      <td class="${r >= 0 ? 'r-win' : 'r-loss'}">${fmtPnl(t.pnl)}</td>
+      <td>${t.session || ''}</td>
+    `;
+    tr.addEventListener('click', () => selectTrade(i));
+    fragment.appendChild(tr);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(fragment);
+}
+
+function selectTrade(idx) {
+  state.selectedTradeIdx = idx;
+  state.following = false;
+  document.getElementById('follow-btn').style.display = 'block';
+
+  renderTradeTable();
+  showTradeDetail(state.trades[idx]);
+  navigateToTrade(state.trades[idx]);
+  updateNavInfo();
+}
+
+function deselectTrade() {
+  state.selectedTradeIdx = -1;
+  renderTradeTable();
+  document.getElementById('trade-detail').innerHTML = '<span style="color:var(--muted);font-size:11px">Select a trade to see details</span>';
+  clearSLTP();
+  updateNavInfo();
+}
+
+function updateNavInfo() {
+  const el = document.getElementById('trade-nav-info');
+  if (state.selectedTradeIdx < 0) { el.textContent = ''; return; }
+  el.textContent = `${state.selectedTradeIdx + 1} / ${state.trades.length} [ / ]`;
+}
+
+function showTradeDetail(t) {
+  if (!t) return;
+  const r = parseFloat(t.r_multiple) || 0;
+  const rClass = r >= 0 ? 'pos' : 'neg';
+  document.getElementById('trade-detail').innerHTML = `
+    <h3>Trade #${state.selectedTradeIdx + 1}</h3>
+    <div class="detail-row"><span class="detail-key">Direction</span><span class="detail-val ${t.direction === 'long' ? 'pos' : 'neg'}">${(t.direction || '').toUpperCase()}</span></div>
+    <div class="detail-row"><span class="detail-key">Entry Time</span><span class="detail-val">${formatTime(t.entry_time)}</span></div>
+    <div class="detail-row"><span class="detail-key">Exit Time</span><span class="detail-val">${formatTime(t.exit_time)}</span></div>
+    <div class="detail-row"><span class="detail-key">Entry Price</span><span class="detail-val">${fmtPrice(t.entry_price)}</span></div>
+    <div class="detail-row"><span class="detail-key">Exit Price</span><span class="detail-val">${fmtPrice(t.exit_price)}</span></div>
+    <div class="detail-row"><span class="detail-key">Stop Loss</span><span class="detail-val neg">${fmtPrice(t.stop_loss)}</span></div>
+    <div class="detail-row"><span class="detail-key">Take Profit</span><span class="detail-val pos">${fmtPrice(t.take_profit)}</span></div>
+    <div class="detail-row"><span class="detail-key">R-Multiple</span><span class="detail-val ${rClass}">${r.toFixed(3)}R</span></div>
+    <div class="detail-row"><span class="detail-key">PnL</span><span class="detail-val ${rClass}">${fmtPnl(t.pnl)}</span></div>
+    <div class="detail-row"><span class="detail-key">Session</span><span class="detail-val">${t.session || '-'}</span></div>
+    <div class="detail-row"><span class="detail-key">Tier</span><span class="detail-val">${t.signal_tier || '-'}</span></div>
+    <div class="detail-row"><span class="detail-key">Confluence</span><span class="detail-val">${(t.confluence_score || 0).toFixed(2)}</span></div>
+    <div class="detail-row"><span class="detail-key">Reason</span><span class="detail-val" style="font-size:9px;max-width:140px;word-break:break-word">${t.reason || '-'}</span></div>
+  `;
+  showSLTP(t);
+}
+
+function navigateToTrade(trade) {
+  if (!trade || !trade.entry_time) return;
+  const ts = toUnixSeconds(trade.entry_time);
+  if (!ts) return;
+  const visible = chart.timeScale().getVisibleRange();
+  if (!visible) return;
+  const span = (visible.to - visible.from) / 2;
+  chart.timeScale().setVisibleRange({ from: ts - span, to: ts + span });
+}
+
+// Keyboard navigation
+function navTrade(delta) {
+  const newIdx = state.selectedTradeIdx + delta;
+  if (newIdx < 0 || newIdx >= state.trades.length) return;
+  selectTrade(newIdx);
+  // Scroll table row into view
+  const rows = document.querySelectorAll('#trade-tbody tr');
+  if (rows[newIdx]) rows[newIdx].scrollIntoView({ block: 'nearest' });
+}
+
+// ================================================================
+// Timeframe switching
+// ================================================================
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tf = btn.dataset.tf;
+    if (tf === state.currentTf) return;
+    state.currentTf = tf;
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
+    // Reset candle data for new tf
+    const data = state.candleData[tf];
+    if (data && data.length > 0) {
+      applyChartData(data);
+    } else {
+      candleSeries.setData([]);
+      tenkanSeries.setData([]);
+      kijunSeries.setData([]);
+      chikouSeries.setData([]);
+      senkouASeries.setData([]);
+      senkouBSeries.setData([]);
+    }
+    rebuildMarkers();
+    rebuildZones();
+  });
+});
+
+// Auto-follow
+document.getElementById('follow-btn').addEventListener('click', () => {
+  state.following = true;
+  document.getElementById('follow-btn').style.display = 'none';
+  state.selectedTradeIdx = -1;
+  renderTradeTable();
+  clearSLTP();
+  scrollToLatest();
+});
+
+function scrollToLatest() {
+  const data = state.candleData[state.currentTf];
+  if (data && data.length > 0) {
+    chart.timeScale().scrollToRealTime();
+  }
+}
+
+// ================================================================
+// Polling
+// ================================================================
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+async function pollState() {
+  try {
+    const s = await fetchJSON('/api/state');
+    updateHeader(s);
+    updateMetricsBar(s);
+    updateGauges(s);
+    updateEquityPanel(s);
+    state.running = s.running;
+    state.done = s.done;
+  } catch (e) { /* server not ready */ }
+}
+
+async function pollCandles() {
+  try {
+    const tf = state.currentTf;
+    const since = state.candleSince[tf];
+    const newCandles = await fetchJSON(`/api/candles?tf=${tf}&since=${since}`);
+    if (!newCandles || newCandles.length === 0) return;
+
+    const buf = state.candleData[tf];
+    if (since === 0 && buf.length === 0) {
+      // First load
+      state.candleData[tf] = newCandles;
+      applyChartData(newCandles);
+    } else {
+      // Incremental
+      for (const c of newCandles) buf.push(c);
+      updateChartIncrementally(newCandles);
+    }
+    state.candleSince[tf] = newCandles[newCandles.length - 1][0];
+
+    if (state.following) scrollToLatest();
+  } catch (e) { /* ignore */ }
+}
+
+async function pollTrades() {
+  try {
+    const result = await fetchJSON(`/api/trades?since=${state.tradeSince}`);
+    if (!result || !result.trades || result.trades.length === 0) return;
+
+    state.trades.push(...result.trades);
+    state.tradeSince = result.next_index;
+
+    renderTradeTable();
+    rebuildMarkers();
+    rebuildZones();
+
+    // Auto-scroll trade list if following
+    if (state.following) {
+      const container = document.getElementById('trade-list-container');
+      container.scrollTop = container.scrollHeight;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+let lastPollTime = 0;
+
+async function poll() {
+  const now = Date.now();
+  if (now - lastPollTime < 500) return;
+  lastPollTime = now;
+
+  await Promise.allSettled([pollState(), pollCandles(), pollTrades()]);
+}
+
+setInterval(poll, 500);
+
+// Also poll all timeframe candle data in the background
+async function pollOtherTfs() {
+  const tfs = ['5m', '15m', '1h', '4h'];
+  for (const tf of tfs) {
+    if (tf === state.currentTf) continue;
+    try {
+      const since = state.candleSince[tf];
+      const newCandles = await fetchJSON(`/api/candles?tf=${tf}&since=${since}`);
+      if (!newCandles || newCandles.length === 0) continue;
+      const buf = state.candleData[tf];
+      for (const c of newCandles) buf.push(c);
+      if (newCandles.length > 0) {
+        state.candleSince[tf] = newCandles[newCandles.length - 1][0];
+      }
+    } catch (e) { /* ignore */ }
+  }
+}
+setInterval(pollOtherTfs, 5000);
+
+// ================================================================
+// Settings panel
+// ================================================================
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsPanel = document.getElementById('settings-panel');
+
+function openSettings() {
+  settingsOverlay.classList.add('open');
+  settingsPanel.classList.add('open');
+  loadConfig();
+}
+
+function closeSettings() {
+  settingsOverlay.classList.remove('open');
+  settingsPanel.classList.remove('open');
+}
+
+document.getElementById('gear-btn').addEventListener('click', openSettings);
+document.getElementById('settings-close-btn').addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', closeSettings);
+
+async function loadConfig() {
+  try {
+    const config = await fetchJSON('/api/config');
+    renderEdges(config.edges || {});
+    renderStrategyConfig(config.strategy || {});
+  } catch (e) {
+    document.getElementById('edges-list').innerHTML = '<em style="color:var(--muted)">Could not load config</em>';
+  }
+}
+
+function renderEdges(edges) {
+  const container = document.getElementById('edges-list');
+  if (!Object.keys(edges).length) {
+    container.innerHTML = '<em style="color:var(--muted);font-size:11px">No edges configured</em>';
+    return;
+  }
+  container.innerHTML = '';
+  for (const [name, cfg] of Object.entries(edges)) {
+    const item = document.createElement('div');
+    item.className = 'edge-item';
+    const enabled = cfg.enabled !== false;
+    const params = cfg.params || {};
+    const paramsHtml = Object.entries(params).map(([k, v]) => `
+      <div class="param-row">
+        <span class="param-label">${k}</span>
+        <input class="param-input" type="text" data-param="${k}" value="${v}">
+      </div>
+    `).join('');
+
+    item.innerHTML = `
+      <div class="edge-header">
+        <span class="edge-name">${name.replace(/_/g, ' ')}</span>
+        <label class="toggle-switch" title="Toggle ${name}">
+          <input type="checkbox" data-edge="${name}" ${enabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="edge-expand-btn" data-edge="${name}">&#9660;</button>
+      </div>
+      ${paramsHtml ? `<div class="edge-params" id="ep-${name}">
+        ${paramsHtml}
+        <button class="apply-btn" data-edge="${name}">Apply</button>
+      </div>` : ''}
+    `;
+    container.appendChild(item);
+
+    // Toggle enable/disable
+    item.querySelector(`input[data-edge="${name}"]`).addEventListener('change', async (e) => {
+      try {
+        await fetch('/api/config/edges', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ edge_name: name, enabled: e.target.checked }),
+        });
+        showNotification(`Edge "${name}" ${e.target.checked ? 'enabled' : 'disabled'}`);
+      } catch (err) {
+        showNotification('Error: ' + err.message, true);
+      }
+    });
+
+    // Expand params
+    const expandBtn = item.querySelector(`.edge-expand-btn[data-edge="${name}"]`);
+    if (expandBtn) {
+      expandBtn.addEventListener('click', () => {
+        const ep = document.getElementById(`ep-${name}`);
+        if (ep) {
+          const isOpen = ep.classList.toggle('open');
+          expandBtn.innerHTML = isOpen ? '&#9650;' : '&#9660;';
+        }
+      });
+    }
+
+    // Apply params
+    const applyBtn = item.querySelector(`.apply-btn[data-edge="${name}"]`);
+    if (applyBtn) {
+      applyBtn.addEventListener('click', async () => {
+        const inputs = item.querySelectorAll('.param-input');
+        const newParams = {};
+        inputs.forEach(inp => {
+          const val = inp.value;
+          newParams[inp.dataset.param] = isNaN(val) ? val : parseFloat(val);
+        });
+        try {
+          await fetch('/api/config/edges', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ edge_name: name, params: newParams }),
+          });
+          showNotification(`Applied params for "${name}"`);
+        } catch (err) {
+          showNotification('Error: ' + err.message, true);
+        }
+      });
+    }
+  }
+}
+
+function renderStrategyConfig(strategy) {
+  const container = document.getElementById('strategy-sections-container');
+  container.innerHTML = '';
+  for (const [section, params] of Object.entries(strategy)) {
+    const div = document.createElement('div');
+    div.className = 'settings-section';
+    const paramsHtml = Object.entries(params).map(([k, v]) => `
+      <div class="param-row">
+        <span class="param-label">${k}</span>
+        <input class="param-input" type="text" data-param="${k}" value="${v}">
+      </div>
+    `).join('');
+    div.innerHTML = `
+      <div class="settings-section-header collapsed" data-section="${section}">
+        <h3>${section}</h3>
+        <span class="section-toggle-arrow">&#9660;</span>
+      </div>
+      <div class="settings-section-content hidden">
+        ${paramsHtml}
+        <button class="apply-btn" data-section="${section}">Apply</button>
+      </div>
+    `;
+    container.appendChild(div);
+
+    // Toggle section collapse
+    div.querySelector('.settings-section-header').addEventListener('click', (e) => {
+      const hdr = e.currentTarget;
+      hdr.classList.toggle('collapsed');
+      const content = hdr.nextElementSibling;
+      content.classList.toggle('hidden');
+    });
+
+    // Apply section params
+    div.querySelector(`.apply-btn[data-section="${section}"]`).addEventListener('click', async () => {
+      const inputs = div.querySelectorAll('.param-input');
+      const newParams = {};
+      inputs.forEach(inp => {
+        const val = inp.value;
+        newParams[inp.dataset.param] = isNaN(val) ? val : parseFloat(val);
+      });
+      try {
+        await fetch('/api/config/strategy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section, params: newParams }),
+        });
+        showNotification(`Applied "${section}" params`);
+      } catch (err) {
+        showNotification('Error: ' + err.message, true);
+      }
+    });
+  }
+}
+
+// Collapsible sections (static)
+document.querySelectorAll('.settings-section-header[data-target]').forEach(hdr => {
+  hdr.addEventListener('click', () => {
+    hdr.classList.toggle('collapsed');
+    const content = document.getElementById(hdr.dataset.target);
+    if (content) content.classList.toggle('hidden');
+  });
+});
+
+document.getElementById('save-config-btn').addEventListener('click', async () => {
+  try {
+    const resp = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    const statusEl = document.getElementById('config-status');
+    if (data.status === 'ok') {
+      statusEl.textContent = 'Saved to disk';
+      statusEl.style.color = 'var(--win)';
+      showNotification('Config saved to disk');
+    } else {
+      statusEl.textContent = data.message || 'Error saving';
+      statusEl.style.color = 'var(--loss)';
+    }
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+  } catch (e) {
+    showNotification('Error saving: ' + e.message, true);
+  }
+});
+
+// ================================================================
+// Trade panel resize
+// ================================================================
+const tradePanel = document.getElementById('trade-panel');
+const resizer = document.getElementById('trade-panel-resizer');
+let isResizing = false;
+let resizerStartY = 0;
+let resizerStartH = 0;
+
+resizer.addEventListener('mousedown', (e) => {
+  isResizing = true;
+  resizerStartY = e.clientY;
+  resizerStartH = tradePanel.offsetHeight;
+  document.body.style.cursor = 'ns-resize';
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isResizing) return;
+  const delta = resizerStartY - e.clientY;
+  const newH = Math.max(80, Math.min(window.innerHeight * 0.5, resizerStartH + delta));
+  tradePanel.style.height = newH + 'px';
+});
+
+document.addEventListener('mouseup', () => {
+  if (isResizing) {
+    isResizing = false;
+    document.body.style.cursor = '';
+    resizeChart();
+  }
+});
+
+document.getElementById('collapse-trades-btn').addEventListener('click', toggleTradePanel);
+
+// ================================================================
+// Keyboard shortcuts
+// ================================================================
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement.tagName.toLowerCase();
+  const isInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+
+  if (e.key === 'Escape') {
+    if (settingsPanel.classList.contains('open')) {
+      closeSettings();
+    } else if (state.selectedTradeIdx >= 0) {
+      deselectTrade();
+    }
+    return;
+  }
+
+  if (isInput) return;
+
+  switch (e.key) {
+    case 't': case 'T':
+      toggleTradePanel();
+      break;
+    case 's': case 'S':
+      if (settingsPanel.classList.contains('open')) closeSettings();
+      else openSettings();
+      break;
+    case '[':
+      navTrade(-1);
+      break;
+    case ']':
+      navTrade(1);
+      break;
+    case 'Home':
+      if (state.trades.length > 0) selectTrade(0);
+      e.preventDefault();
+      break;
+    case 'End':
+      if (state.trades.length > 0) selectTrade(state.trades.length - 1);
+      e.preventDefault();
+      break;
+  }
+});
+
+// ================================================================
+// Notification
+// ================================================================
+let notifTimer = null;
+function showNotification(msg, isError) {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.style.borderColor = isError ? 'var(--loss)' : 'var(--accent)';
+  el.classList.add('show');
+  if (notifTimer) clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ================================================================
+// Helpers
+// ================================================================
+function toUnixSeconds(ts) {
+  if (!ts) return null;
+  if (typeof ts === 'number') return ts;
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  return Math.floor(d.getTime() / 1000);
+}
+
+function formatTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toISOString().replace('T', ' ').slice(0, 16);
+}
+
+function fmtPrice(v) {
+  if (v == null) return '-';
+  return parseFloat(v).toFixed(2);
+}
+
+function fmtPnl(v) {
+  if (v == null) return '-';
+  const n = parseFloat(v);
+  return (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2);
+}
+
+// ================================================================
+// Initial poll
+// ================================================================
+poll();
+</script>
+</body>
+</html>

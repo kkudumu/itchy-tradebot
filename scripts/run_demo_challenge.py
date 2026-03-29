@@ -279,7 +279,11 @@ def run_backtest(args: argparse.Namespace) -> int:
     live_server = None
     try:
         from src.backtesting.live_dashboard import LiveDashboardServer
-        live_server = LiveDashboardServer(port=8501, auto_open=True)
+        live_server = LiveDashboardServer(
+            port=8501, auto_open=True,
+            app_config=app_config.model_dump() if hasattr(app_config, 'model_dump') else {},
+            config_dir=str(loader.config_dir),
+        )
         live_server.start()
         logger.info("Live dashboard: %s", live_server.url)
     except Exception as exc:
@@ -297,6 +301,10 @@ def run_backtest(args: argparse.Namespace) -> int:
             prop_firm_max_total_dd_pct=10.0,
             prop_firm_time_limit_days=30,
         )
+        # Wire edge manager to dashboard for runtime config access
+        if live_server is not None:
+            live_server._edge_manager = backtester.edge_manager
+
         result = backtester.run(
             candles_1m=candles,
             instrument=args.instrument,

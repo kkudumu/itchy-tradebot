@@ -318,6 +318,51 @@ class EdgeManager:
         else:
             setter(value)
 
+    def set_edge_params(self, edge_name: str, params: dict) -> None:
+        """Update parameters for a named edge at runtime.
+
+        Updates the edge's config dict and any matching instance attributes.
+
+        Parameters
+        ----------
+        edge_name:
+            Registered edge key (e.g. 'regime_filter').
+        params:
+            Dict of parameter names to new values.
+
+        Raises
+        ------
+        KeyError
+            If ``edge_name`` is not recognised.
+        """
+        if edge_name not in self._all_edges:
+            raise KeyError(
+                f"Unknown edge '{edge_name}'. "
+                f"Available edges: {sorted(self._all_edges.keys())}"
+            )
+        edge = self._all_edges[edge_name]
+        cfg_params = edge.config.get("params", {})
+        cfg_params.update(params)
+        edge.config["params"] = cfg_params
+        for k, v in params.items():
+            if hasattr(edge, k):
+                setattr(edge, k, v)
+
+    def get_all_config(self) -> dict:
+        """Return full configuration for all edges.
+
+        Returns
+        -------
+        dict mapping edge name to ``{"enabled": bool, "params": dict}``.
+        """
+        result: dict[str, dict] = {}
+        for name, edge in self._all_edges.items():
+            result[name] = {
+                "enabled": edge.enabled,
+                "params": dict(edge.config.get("params", {})),
+            }
+        return result
+
     def __repr__(self) -> str:
         enabled = self.get_enabled_edges()
         return (
