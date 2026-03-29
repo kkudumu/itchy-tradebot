@@ -831,7 +831,10 @@ html, body {
     <div id="strategy-sections-container"></div>
   </div>
   <div id="settings-footer">
-    <button id="save-config-btn">&#128190; Save to Disk</button>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button id="save-config-btn" style="flex:1;">&#128190; Save to Disk</button>
+      <span id="dirty-indicator" style="display:none; color:#ffd93d; font-size:16px;" title="Unsaved changes">&#9679;</span>
+    </div>
     <div id="config-status"></div>
   </div>
 </div>
@@ -1002,7 +1005,7 @@ class IchimokuCloudPaneView {
               ctx.lineTo(x * pr, y * pr);
             }
             ctx.closePath();
-            ctx.fillStyle = 'rgba(38,166,154,0.12)';
+            ctx.fillStyle = 'rgba(38,166,154,0.15)';
             ctx.fill();
           }
 
@@ -1027,7 +1030,7 @@ class IchimokuCloudPaneView {
               ctx.lineTo(x * pr, y * pr);
             }
             ctx.closePath();
-            ctx.fillStyle = 'rgba(239,83,80,0.12)';
+            ctx.fillStyle = 'rgba(239,83,80,0.15)';
             ctx.fill();
           }
           ctx.restore();
@@ -1077,8 +1080,8 @@ class TradeZonePaneView {
             const yT = Math.min(y1, y2) * pr;
             const yB = Math.max(y1, y2) * pr;
             ctx.fillStyle = z.win
-              ? 'rgba(0,255,136,0.06)'
-              : 'rgba(255,68,68,0.06)';
+              ? 'rgba(38,166,91,0.25)'
+              : 'rgba(214,48,49,0.25)';
             ctx.fillRect(xL, yT, xR - xL, yB - yT);
             ctx.strokeStyle = z.win
               ? 'rgba(0,255,136,0.25)'
@@ -1209,7 +1212,8 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
 // ================================================================
 function buildSeriesData(candles) {
   const cs = [], tenkan = [], kijun = [], chikou = [], sA = [], sB = [];
-  for (const c of candles) {
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
     const t = c[0]; // unix seconds
     if (!t) continue;
     cs.push({ time: t, open: c[1], high: c[2], low: c[3], close: c[4] });
@@ -1217,7 +1221,22 @@ function buildSeriesData(candles) {
     if (c[7] != null && c[7] !== 0) kijun.push({ time: t, value: c[7] });
     if (c[8] != null && c[8] !== 0) sA.push({ time: t, value: c[8] });
     if (c[9] != null && c[9] !== 0) sB.push({ time: t, value: c[9] });
-    if (c[10] != null && c[10] !== 0) chikou.push({ time: t, value: c[10] });
+    // Chikou: plot current close 26 bars back in time
+    if (c[10] != null && c[10] !== 0 && i >= 26) {
+      chikou.push({ time: candles[i - 26][0], value: c[10] });
+    }
+  }
+  // Senkou A/B: project 26 bars forward using estimated bar interval
+  if (candles.length >= 2) {
+    const barInterval = candles[candles.length - 1][0] - candles[candles.length - 2][0];
+    const lastTime = candles[candles.length - 1][0];
+    for (let k = 1; k <= 26; k++) {
+      const futureTime = lastTime + k * barInterval;
+      const lastA = sA.length > 0 ? sA[sA.length - 1].value : null;
+      const lastB = sB.length > 0 ? sB[sB.length - 1].value : null;
+      if (lastA != null) sA.push({ time: futureTime, value: lastA });
+      if (lastB != null) sB.push({ time: futureTime, value: lastB });
+    }
   }
   return { cs, tenkan, kijun, chikou, sA, sB };
 }
@@ -1358,8 +1377,21 @@ function updateHeader(s) {
 
   const pct = Math.min(100, s.pct_complete || 0);
   document.getElementById('header-progress-fill').style.width = pct + '%';
-  document.getElementById('progress-info').textContent =
-    `${(s.bar_index || 0).toLocaleString()} / ${(s.total_bars || 0).toLocaleString()} bars`;
+  let progressText = `${(s.bar_index || 0).toLocaleString()} / ${(s.total_bars || 0).toLocaleString()} bars`;
+  if (s.current_timestamp) {
+    const tsStr = formatTime(s.current_timestamp);
+    progressText += ` | ${tsStr}`;
+  }
+  if (s.data_start_date || s.data_end_date) {
+    const fmtShort = (d) => {
+      if (!d) return '?';
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return String(d).slice(0, 10);
+      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+    progressText += ` | ${fmtShort(s.data_start_date)} – ${fmtShort(s.data_end_date)}`;
+  }
+  document.getElementById('progress-info').textContent = progressText;
 
   const elapsed = s.elapsed_seconds || 0;
   document.getElementById('elapsed-label').textContent =
@@ -1500,10 +1532,12 @@ function navigateToTrade(trade) {
   if (!trade || !trade.entry_time) return;
   const ts = toUnixSeconds(trade.entry_time);
   if (!ts) return;
-  const visible = chart.timeScale().getVisibleRange();
-  if (!visible) return;
-  const span = (visible.to - visible.from) / 2;
-  chart.timeScale().setVisibleRange({ from: ts - span, to: ts + span });
+  const contextBars = { '5m': 50, '15m': 30, '1h': 20, '4h': 12 };
+  const barIntervalSec = { '5m': 300, '15m': 900, '1h': 3600, '4h': 14400 };
+  const barCount = contextBars[state.currentTf] || 50;
+  const barInterval = barIntervalSec[state.currentTf] || 300;
+  const padding = barCount * barInterval;
+  chart.timeScale().setVisibleRange({ from: ts - padding, to: ts + padding });
 }
 
 // Keyboard navigation
@@ -1523,6 +1557,8 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tf = btn.dataset.tf;
     if (tf === state.currentTf) return;
+    // Save visible range before switching
+    const savedRange = chart.timeScale().getVisibleRange();
     state.currentTf = tf;
     document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === tf));
     // Reset candle data for new tf
@@ -1539,6 +1575,10 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     }
     rebuildMarkers();
     rebuildZones();
+    // Restore visible range after chart renders
+    if (savedRange) {
+      setTimeout(() => chart.timeScale().setVisibleRange(savedRange), 0);
+    }
   });
 });
 
@@ -1657,6 +1697,12 @@ setInterval(pollOtherTfs, 5000);
 // ================================================================
 // Settings panel
 // ================================================================
+let configDirty = false;
+function setConfigDirty(val) {
+  configDirty = val;
+  document.getElementById('dirty-indicator').style.display = val ? 'inline' : 'none';
+}
+
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsPanel = document.getElementById('settings-panel');
 
@@ -1723,11 +1769,12 @@ function renderEdges(edges) {
     // Toggle enable/disable
     item.querySelector(`input[data-edge="${name}"]`).addEventListener('change', async (e) => {
       try {
-        await fetch('/api/config/edges', {
+        const resp = await fetch('/api/config/edges', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ edge_name: name, enabled: e.target.checked }),
         });
+        if (resp.ok) setConfigDirty(true);
         showNotification(`Edge "${name}" ${e.target.checked ? 'enabled' : 'disabled'}`);
       } catch (err) {
         showNotification('Error: ' + err.message, true);
@@ -1757,11 +1804,12 @@ function renderEdges(edges) {
           newParams[inp.dataset.param] = isNaN(val) ? val : parseFloat(val);
         });
         try {
-          await fetch('/api/config/edges', {
+          const resp = await fetch('/api/config/edges', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ edge_name: name, params: newParams }),
           });
+          if (resp.ok) setConfigDirty(true);
           showNotification(`Applied params for "${name}"`);
         } catch (err) {
           showNotification('Error: ' + err.message, true);
@@ -1812,11 +1860,12 @@ function renderStrategyConfig(strategy) {
         newParams[inp.dataset.param] = isNaN(val) ? val : parseFloat(val);
       });
       try {
-        await fetch('/api/config/strategy', {
+        const resp = await fetch('/api/config/strategy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ section, params: newParams }),
         });
+        if (resp.ok) setConfigDirty(true);
         showNotification(`Applied "${section}" params`);
       } catch (err) {
         showNotification('Error: ' + err.message, true);
@@ -1844,6 +1893,7 @@ document.getElementById('save-config-btn').addEventListener('click', async () =>
     const data = await resp.json();
     const statusEl = document.getElementById('config-status');
     if (data.status === 'ok') {
+      setConfigDirty(false);
       statusEl.textContent = 'Saved to disk';
       statusEl.style.color = 'var(--win)';
       showNotification('Config saved to disk');
@@ -1929,6 +1979,10 @@ document.addEventListener('keydown', (e) => {
       break;
     case 'End':
       if (state.trades.length > 0) selectTrade(state.trades.length - 1);
+      // Also resume auto-follow
+      state.following = true;
+      document.getElementById('follow-btn').style.display = 'none';
+      scrollToLatest();
       e.preventDefault();
       break;
   }
