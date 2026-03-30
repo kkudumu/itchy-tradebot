@@ -16,9 +16,9 @@ Usage example::
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -439,8 +439,6 @@ class ResultsExporter:
         2. Truncate ``config_snapshot`` to first-level keys only.
         3. Drop the ``comparison`` section if still too large.
         """
-        import copy
-
         trimmed = copy.deepcopy(report)
 
         # Step 1: strip edge_results from individual trades.
