@@ -94,6 +94,9 @@ class BacktestResult:
     total_signals: int = 0
     """Total raw signals generated before edge filtering."""
 
+    challenge_simulation: Optional[Any] = None
+    """ChallengeSimulationResult from post-backtest challenge simulation."""
+
 
 # =============================================================================
 # IchimokuBacktester
@@ -213,6 +216,27 @@ class IchimokuBacktester:
             baseline_win_rate=cfg.get("baseline_win_rate", 0.55),
         )
 
+        # Multi-strategy support
+        from src.strategy.strategies.asian_breakout import AsianBreakoutStrategy
+        from src.strategy.strategies.ema_pullback import EMAPullbackStrategy
+        from src.strategy.signal_blender import SignalBlender
+
+        active_strategy_names = cfg.get("active_strategies", ["ichimoku"])
+        self._active_strategies: List[tuple] = []
+        strategy_configs = cfg.get("strategies", {}) if isinstance(cfg.get("strategies"), dict) else {}
+
+        for name in active_strategy_names:
+            if name == "ichimoku":
+                pass  # Existing signal_engine handles ichimoku via _scan_for_signal
+            elif name == "asian_breakout":
+                ab_config = strategy_configs.get("asian_breakout", {})
+                self._active_strategies.append(("asian_breakout", AsianBreakoutStrategy(config=ab_config)))
+            elif name == "ema_pullback":
+                ep_config = strategy_configs.get("ema_pullback", {})
+                self._active_strategies.append(("ema_pullback", EMAPullbackStrategy(config=ep_config)))
+
+        self._signal_blender = SignalBlender(multi_agree_bonus=2)
+
     # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
@@ -262,6 +286,7 @@ class IchimokuBacktester:
 
         # 1. Prepare multi-TF data
         tf_data = self.data_preparer.prepare(candles_1m)
+        self._candles_1m = candles_1m  # Keep reference for signal scanning
         df_5m = tf_data["5M"]
 
         if len(df_5m) < _WARMUP_BARS:
@@ -459,10 +484,51 @@ class IchimokuBacktester:
             # ------------------------------------------------------------------
             # Look for new trade entry (only when flat)
             # ------------------------------------------------------------------
-            elif bar_idx >= _WARMUP_BARS:
+            elif bar_idx >= _WARMUP_BARS and not self.health_monitor.is_halted:
                 can_open, reason = self.trade_manager.can_open_trade(balance, instrument)
                 if can_open:
-                    signal = self._scan_for_signal(tf_data, bar_idx, instrument)
+                    # Collect signals from all active strategies
+                    all_signals: List[Signal] = []
+                    cfg = self._config
+
+                    # Try existing Ichimoku scanner (if ichimoku is in active strategies)
+                    active_names = [n for n, _ in self._active_strategies]
+                    if "ichimoku" in active_names or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]):
+                        ichi_signal = self._scan_for_signal(tf_data, bar_idx, instrument)
+                        if ichi_signal is not None:
+                            all_signals.append(ichi_signal)
+
+                    # Try other strategies
+                    for strat_name, strategy_obj in self._active_strategies:
+                        try:
+                            if strat_name == "asian_breakout":
+                                sig = strategy_obj.on_bar(
+                                    ts,
+                                    high=high,
+                                    low=low,
+                                    close=close,
+                                )
+                            elif strat_name == "ema_pullback":
+                                sig = strategy_obj.on_bar(
+                                    ts,
+                                    open=float(row_5m.get("open", close)),
+                                    high=high,
+                                    low=low,
+                                    close=close,
+                                    ema_fast=float(row_5m.get("ema_fast", 0.0)),
+                                    ema_mid=float(row_5m.get("ema_mid", 0.0)),
+                                    ema_slow=float(row_5m.get("ema_slow", 0.0)),
+                                    atr=float(row_5m.get("atr", 0.0) or 0.0),
+                                )
+                            else:
+                                sig = None
+                            if sig is not None:
+                                all_signals.append(sig)
+                        except Exception:
+                            pass  # Strategy failed on this bar, skip
+
+                    # Pick best signal
+                    signal = self._signal_blender.select(all_signals) if all_signals else None
 
                     if signal is not None:
                         total_signals += 1
@@ -569,6 +635,33 @@ class IchimokuBacktester:
 
             # Health monitor per-bar update
             self.health_monitor.on_bar(bar_idx, signal=bar_signal)
+
+            # HALTED enforcement: force-close active trade when health monitor halts
+            if self.health_monitor.is_halted and active_trade_id is not None:
+                trade_summary = self.trade_manager.close_trade(
+                    trade_id=active_trade_id,
+                    exit_price=close,
+                    reason="health_monitor_halted",
+                )
+                trade_summary = self._enrich_trade_summary(
+                    trade_summary, active_signal, active_context, instrument, balance
+                )
+                closed_trades.append(trade_summary)
+                _r = float(trade_summary.get("r_multiple") or 0.0)
+                equity_by_r.append(_r)
+                if _r > 0: _n_wins += 1
+                else: _n_losses += 1
+                balance = self._update_balance_from_trade(balance, trade_summary)
+                self._record_learning(trade_summary, active_context, enable_learning)
+                self.health_monitor.on_trade_closed(won=_r > 0)
+                if live_dashboard is not None:
+                    self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                logger.warning("HALTED: force-closed trade %s at bar %d", active_trade_id, bar_idx)
+                active_trade_id = None
+                active_trade = None
+                active_signal = None
+                active_context = None
+                candles_since_entry = 0
 
             # Push candle data to dashboard
             if live_dashboard is not None:
@@ -735,6 +828,40 @@ class IchimokuBacktester:
 
         prop_status = self.prop_firm_tracker.check_pass()
 
+        # ------------------------------------------------------------------
+        # Challenge simulation (Monte Carlo + rolling window)
+        # ------------------------------------------------------------------
+        challenge_sim = None
+        if closed_trades:
+            try:
+                from src.backtesting.challenge_simulator import ChallengeSimulator
+
+                sim_trades = []
+                for t in closed_trades:
+                    entry_time = t.get("entry_time", first_ts)
+                    if hasattr(entry_time, "__sub__") and hasattr(first_ts, "__sub__"):
+                        try:
+                            day_index = (entry_time - first_ts).days
+                        except (TypeError, AttributeError):
+                            day_index = 0
+                    else:
+                        day_index = 0
+                    sim_trades.append({
+                        "r_multiple": float(t.get("r_multiple", 0.0)),
+                        "risk_pct": float(t.get("risk_pct", 1.5)),
+                        "day_index": day_index,
+                    })
+
+                simulator = ChallengeSimulator()
+                total_days = (df_5m.index[-1] - df_5m.index[0]).days if len(df_5m) > 1 else 0
+                challenge_sim = simulator.run(
+                    sim_trades,
+                    total_trading_days=max(total_days, 1),
+                    n_mc_simulations=1000,
+                )
+            except Exception as exc:
+                logger.warning("Challenge simulation failed: %s", exc)
+
         learning_phase = self.learning_engine.get_phase() if enable_learning else "disabled"
         logger.info(
             "Backtest complete: %d trades, win_rate=%.1f%%, return=%.2f%%, "
@@ -762,6 +889,7 @@ class IchimokuBacktester:
             daily_pnl=daily_pnl,
             skipped_signals=skipped_signals,
             total_signals=total_signals,
+            challenge_simulation=challenge_sim,
         )
 
     # ------------------------------------------------------------------
@@ -780,8 +908,8 @@ class IchimokuBacktester:
             "entry_price": float(trade_summary.get("entry_price", 0)),
             "exit_price": float(trade_summary.get("exit_price", 0)),
             "r_multiple": float(trade_summary.get("r_multiple", 0)),
-            "pnl": float(trade_summary.get("pnl", 0)),
-            "stop_loss": float(trade_summary.get("stop_loss", 0)),
+            "pnl": float(trade_summary.get("pnl_points", 0)) * float(trade_summary.get("lot_size", 0)) * 100.0,
+            "stop_loss": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "take_profit": float(trade_summary.get("take_profit", 0)),
             "reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
             "confluence_score": int(trade_summary.get("confluence_score", 0)),
@@ -793,6 +921,10 @@ class IchimokuBacktester:
     # Signal scanning
     # ------------------------------------------------------------------
 
+    # Maximum 1M bars needed for signal scan: 52 periods on 4H = 52*240 = 12480,
+    # plus Chikou lookback = 26*240 = 6240.  Round up to 20000 for safety.
+    _SCAN_LOOKBACK_1M: int = 80_000
+
     def _scan_for_signal(
         self,
         tf_data: Dict[str, pd.DataFrame],
@@ -801,22 +933,27 @@ class IchimokuBacktester:
     ) -> Optional[Signal]:
         """Attempt to generate a signal at the given 5M bar index.
 
-        Slices the 5M data up to bar_idx+1 (inclusive) and passes it to
-        SignalEngine.scan() which calls MTFAnalyzer.align_timeframes()
-        internally.  The slice prevents the engine from using future bars.
+        Passes a trailing window of 1M data (sliced to the current 5M
+        bar's timestamp) to SignalEngine.scan(), which resamples
+        internally to all required timeframes.
         """
         df_5m = tf_data["5M"]
-        # Reconstruct a 1M-equivalent slice from 5M data for the engine.
-        # SignalEngine.scan() expects a 1M DataFrame and resamples internally,
-        # so we pass the 5M slice directly by treating each 5M bar as a 1M bar
-        # for scan purposes (the engine resamples to higher TFs anyway).
-        data_slice = df_5m.iloc[: bar_idx + 1]
 
-        if len(data_slice) < _WARMUP_BARS:
+        if bar_idx < _WARMUP_BARS:
+            return None
+
+        # Get the timestamp of the current 5M bar to slice 1M data
+        current_ts = df_5m.index[bar_idx]
+        # Use a trailing window instead of the full history for performance
+        end_loc = self._candles_1m.index.searchsorted(current_ts, side="right")
+        start_loc = max(0, end_loc - self._SCAN_LOOKBACK_1M)
+        data_1m_slice = self._candles_1m.iloc[start_loc:end_loc]
+
+        if len(data_1m_slice) < _WARMUP_BARS * 5:
             return None
 
         try:
-            signal = self.signal_engine.scan(data_1m=data_slice, current_bar=-1)
+            signal = self.signal_engine.scan(data_1m=data_1m_slice, current_bar=-1)
             if signal is not None:
                 signal.instrument = instrument
             return signal

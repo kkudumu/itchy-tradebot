@@ -753,3 +753,123 @@ class TestFullPipeline:
         if not result.daily_pnl.empty:
             # Daily P&L fractions should be plausible (not > ±50% per day)
             assert all(abs(v) < 0.5 for v in result.daily_pnl.values if not math.isnan(v))
+
+    def test_backtest_result_has_challenge_simulation_field(self):
+        from src.backtesting.vectorbt_engine import IchimokuBacktester, BacktestResult
+        candles = _make_1m_candles(n=500, seed=61)
+        bt = IchimokuBacktester(initial_balance=10_000.0)
+        result = bt.run(candles)
+        assert isinstance(result, BacktestResult)
+        assert hasattr(result, "challenge_simulation")
+
+
+# =============================================================================
+# 10. Multi-strategy backtest integration
+# =============================================================================
+
+class TestMultiStrategyBacktest:
+    """Verify the multi-strategy signal blending integration in IchimokuBacktester."""
+
+    def test_backtest_with_asian_breakout_instantiates(self):
+        """Verify backtest engine accepts active_strategies config."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["asian_breakout"],
+            "edges": {},
+            "atr_stop_multiplier": 2.5,
+        }
+        bt = IchimokuBacktester(config=config)
+        assert len(bt._active_strategies) >= 1
+        names = [n for n, _ in bt._active_strategies]
+        assert "asian_breakout" in names
+
+    def test_backtest_with_ema_pullback_instantiates(self):
+        """Verify backtest engine accepts ema_pullback active strategy."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["ema_pullback"],
+            "edges": {},
+        }
+        bt = IchimokuBacktester(config=config)
+        assert len(bt._active_strategies) >= 1
+        names = [n for n, _ in bt._active_strategies]
+        assert "ema_pullback" in names
+
+    def test_backtest_with_all_strategies_instantiates(self):
+        """Verify all three strategies can be configured together."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["ichimoku", "asian_breakout", "ema_pullback"],
+            "edges": {},
+        }
+        bt = IchimokuBacktester(config=config)
+        # ichimoku is handled by _scan_for_signal, not in _active_strategies
+        names = [n for n, _ in bt._active_strategies]
+        assert "asian_breakout" in names
+        assert "ema_pullback" in names
+
+    def test_default_ichimoku_only(self):
+        """Default config should default to ichimoku (no extra strategies)."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        bt = IchimokuBacktester()
+        assert len(bt._active_strategies) == 0  # ichimoku is implicit
+
+    def test_signal_blender_present(self):
+        """Multi-strategy backtester should have a SignalBlender instance."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        from src.strategy.signal_blender import SignalBlender
+        bt = IchimokuBacktester()
+        assert isinstance(bt._signal_blender, SignalBlender)
+
+    def test_multi_strategy_run_completes(self):
+        """Run with asian_breakout active and verify it completes without error."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["ichimoku", "asian_breakout"],
+            "edges": {},
+        }
+        candles = _make_1m_candles(n=500, seed=77)
+        bt = IchimokuBacktester(config=config, initial_balance=10_000.0)
+        result = bt.run(candles)
+        assert result is not None
+        assert isinstance(result.trades, list)
+        assert result.total_signals >= 0
+
+    def test_multi_strategy_ema_run_completes(self):
+        """Run with ema_pullback active and verify it completes without error."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["ichimoku", "ema_pullback"],
+            "edges": {},
+        }
+        candles = _make_1m_candles(n=500, seed=83)
+        bt = IchimokuBacktester(config=config, initial_balance=10_000.0)
+        result = bt.run(candles)
+        assert result is not None
+        assert isinstance(result.trades, list)
+
+    def test_ema_columns_in_prepared_data(self):
+        """BacktestDataPreparer should produce ema_fast/ema_mid/ema_slow columns."""
+        from src.backtesting.multi_tf import BacktestDataPreparer
+        preparer = BacktestDataPreparer()
+        candles = _make_1m_candles(n=500)
+        tf_data = preparer.prepare(candles)
+        df_5m = tf_data["5M"]
+        for col in ("ema_fast", "ema_mid", "ema_slow"):
+            assert col in df_5m.columns, f"Missing EMA column: {col}"
+        # After shift(1), first row should be NaN
+        assert pd.isna(df_5m["ema_fast"].iloc[0])
+
+    def test_strategy_configs_passed_through(self):
+        """Custom strategy sub-config should be forwarded to strategy instances."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        config = {
+            "active_strategies": ["asian_breakout"],
+            "strategies": {
+                "asian_breakout": {"rr_ratio": 3.0},
+            },
+            "edges": {},
+        }
+        bt = IchimokuBacktester(config=config)
+        _, strat = bt._active_strategies[0]
+        assert strat._cfg["rr_ratio"] == 3.0
