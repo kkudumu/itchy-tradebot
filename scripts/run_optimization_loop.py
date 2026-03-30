@@ -295,7 +295,24 @@ class OptimizationLoop:
             # ---- Spawn Claude CLI -------------------------------------------
             logger.info("Spawning Claude CLI for iteration %d …", iteration)
             claude_output = self._spawn_claude(prompt)
-            logger.debug("Claude output: %s", claude_output[:500] if claude_output else "(empty)")
+            logger.info("Claude output (%d chars): %s", len(claude_output), claude_output[:200] if claude_output else "(empty)")
+
+            # Save Claude's full reasoning to the iteration report
+            _reasoning_path = Path(self._exporter._reports_dir) / f"{run_id}_claude_reasoning.txt"
+            try:
+                _reasoning_path.write_text(claude_output or "(no output)", encoding="utf-8")
+            except OSError:
+                pass
+            # Also append to the JSON report
+            try:
+                _report_json_path = Path(self._exporter._reports_dir) / f"{run_id}.json"
+                if _report_json_path.exists():
+                    _rdata = json.loads(_report_json_path.read_text(encoding="utf-8"))
+                    _rdata["claude_reasoning"] = claude_output or "(no output)"
+                    _rdata["claude_prompt"] = prompt[:5000]  # First 5K of prompt for context
+                    _report_json_path.write_text(json.dumps(_rdata, indent=2, default=str), encoding="utf-8")
+            except (OSError, json.JSONDecodeError):
+                pass
 
             # ---- Detect config changes via git diff -------------------------
             changes_diff = self._detect_changes()
@@ -500,6 +517,19 @@ class OptimizationLoop:
             "",
         ]
 
+        # Include trade-level detail so Claude can see WHY trades lose
+        best_trades = report.get("best_trades", [])
+        worst_trades = report.get("worst_trades", [])
+        if worst_trades or best_trades:
+            lines += ["### Trade Details (worst first)"]
+            for t in (worst_trades + best_trades)[:10]:
+                lines.append(
+                    f"- {t.get('direction', '?')} @ {t.get('entry_price', 0):.2f} -> "
+                    f"{t.get('exit_price', 0):.2f}  R={t.get('r_multiple', 0):.2f}  "
+                    f"reason: {t.get('reason', '?')}"
+                )
+            lines.append("")
+
         # Similar past configs
         if similar_configs:
             lines += ["## Similar Past Configurations (from pgvector)"]
@@ -537,6 +567,14 @@ class OptimizationLoop:
         lines += [
             "## Your Task",
             f"Improve the challenge pass rate. Target: >= {self._target_pass_rate:.0%}",
+            "",
+            "ANALYSIS REQUIRED (write this BEFORE making changes):",
+            "1. What is the BIGGEST problem? (e.g., too few trades, all trades losing, SL too tight)",
+            "2. WHY is this happening? Trace the logic: which strategy is firing, what's the entry quality, why are exits failing?",
+            "3. What specific parameter change would fix the root cause?",
+            "4. What is your confidence level and what could go wrong?",
+            "",
+            "Write at least 3-5 paragraphs of detailed reasoning before making any edits.",
             "",
             "STRICT CONSTRAINTS:",
             f"1. Make AT MOST {self._max_changes} parameter changes total across both config files.",

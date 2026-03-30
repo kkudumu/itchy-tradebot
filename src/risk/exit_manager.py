@@ -135,47 +135,54 @@ class HybridExitManager:
         current_price: float,
         kijun_value: float,
         higher_tf_kijun: Optional[float] = None,
+        bar_high: Optional[float] = None,
+        bar_low: Optional[float] = None,
     ) -> ExitDecision:
-        """Evaluate the current price and return an exit decision.
+        """Evaluate the current bar and return an exit decision.
+
+        When bar_high/bar_low are provided, SL is checked against the
+        worst intrabar price (low for longs, high for shorts) and TP is
+        checked against the best intrabar price. This prevents the
+        close-only bias that misses stops and targets hit within the bar.
 
         Decision priority (evaluated in order):
-        1. Full exit — trailing stop has been hit.
-        2. Partial exit — price reached the 2R take-profit target.
+        1. Full exit — stop hit by worst intrabar price.
+        2. Partial exit — TP hit by best intrabar price.
         3. Trail update — Kijun level has moved favourably.
         4. No action — nothing to do.
-
-        Parameters
-        ----------
-        trade:
-            The currently active trade.
-        current_price:
-            Latest market price.
-        kijun_value:
-            Current Kijun-Sen value on the signal timeframe (H1/15M).
-        higher_tf_kijun:
-            Current Kijun-Sen value on the higher timeframe (4H), or None.
-
-        Returns
-        -------
-        ExitDecision
         """
+        # Use intrabar extremes when available
+        if trade.direction == "long":
+            worst_price = bar_low if bar_low is not None else current_price
+            best_price = bar_high if bar_high is not None else current_price
+        else:
+            worst_price = bar_high if bar_high is not None else current_price
+            best_price = bar_low if bar_low is not None else current_price
+
         r = self.calculate_r_multiple(
             trade.entry_price, current_price, trade.stop_loss, trade.direction
         )
         trade.current_r = r
 
-        # --- Check if the trailing stop has been hit ---
-        if self._stop_hit(trade, current_price):
+        # --- Check if the trailing stop has been hit (use worst price) ---
+        if self._stop_hit(trade, worst_price):
+            # Exit at the stop level, not at the worst price
+            stop_r = self.calculate_r_multiple(
+                trade.entry_price, trade.stop_loss, trade.original_stop_loss, trade.direction
+            )
             return ExitDecision(
                 action="full_exit",
                 close_pct=trade.remaining_pct,
                 new_stop=None,
-                reason=f"Trailing stop hit at {trade.stop_loss:.5f} (R={r:.2f})",
-                r_multiple=r,
+                reason=f"Stop hit at {trade.stop_loss:.5f} (R={stop_r:.2f})",
+                r_multiple=stop_r,
             )
 
-        # --- Partial exit: first 50% at 2R ---
-        if not trade.is_partial and r >= self._tp_r_multiple:
+        # --- Partial exit: check TP against best intrabar price ---
+        best_r = self.calculate_r_multiple(
+            trade.entry_price, best_price, trade.stop_loss, trade.direction
+        )
+        if not trade.is_partial and best_r >= self._tp_r_multiple:
             return ExitDecision(
                 action="partial_exit",
                 close_pct=0.5,

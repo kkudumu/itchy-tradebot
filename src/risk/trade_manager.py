@@ -183,6 +183,8 @@ class TradeManager:
         current_price: float,
         kijun_value: float,
         higher_tf_kijun: Optional[float] = None,
+        bar_high: Optional[float] = None,
+        bar_low: Optional[float] = None,
     ) -> ExitDecision:
         """Evaluate exit conditions and apply stop updates for a trade.
 
@@ -195,11 +197,15 @@ class TradeManager:
         trade_id:
             Identifier returned by :meth:`open_trade`.
         current_price:
-            Latest market price.
+            Latest market price (bar close).
         kijun_value:
             Signal-timeframe Kijun-Sen value.
         higher_tf_kijun:
             Higher-timeframe Kijun-Sen value, or None.
+        bar_high:
+            Highest price in the current bar. Used for intrabar SL/TP checks.
+        bar_low:
+            Lowest price in the current bar. Used for intrabar SL/TP checks.
 
         Returns
         -------
@@ -210,7 +216,8 @@ class TradeManager:
 
         trade = self._active_trades[trade_id]
         decision = self._exit_manager.check_exit(
-            trade, current_price, kijun_value, higher_tf_kijun
+            trade, current_price, kijun_value, higher_tf_kijun,
+            bar_high=bar_high, bar_low=bar_low,
         )
 
         if decision.action == "trail_update" and decision.new_stop is not None:
@@ -264,7 +271,7 @@ class TradeManager:
 
         trade = self._active_trades[trade_id]
         r = self._exit_manager.calculate_r_multiple(
-            trade.entry_price, exit_price, trade.stop_loss, trade.direction
+            trade.entry_price, exit_price, trade.original_stop_loss, trade.direction
         )
         trade.current_r = r
         return self._archive_trade(trade_id, trade, exit_price, reason)

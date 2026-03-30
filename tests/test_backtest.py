@@ -211,13 +211,14 @@ class TestEdgeFiltering:
         from src.backtesting.vectorbt_engine import IchimokuBacktester
         from src.strategy.signal_engine import Signal
 
-        # Time-of-day config that allows NOTHING
+        # Time-of-day config that allows only 02:00-03:00 UTC (no trading hours)
         config = {
             "edges": {
                 "time_of_day": {
                     "enabled": True,
                     "params": {
-                        "allowed_hours": [],  # empty → no hour is allowed
+                        "start_utc": "02:00",
+                        "end_utc": "03:00",
                     },
                 },
             }

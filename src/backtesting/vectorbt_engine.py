@@ -460,11 +460,14 @@ class IchimokuBacktester:
 
                 else:
                     # Check stop, partial exit, and trail via HybridExitManager
+                    # Pass bar high/low for realistic intrabar SL/TP checks
                     decision = self.trade_manager.update_trade(
                         trade_id=active_trade_id,
                         current_price=close,
                         kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
                         higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
+                        bar_high=high,
+                        bar_low=low,
                     )
 
                     if decision.action == "full_exit":

@@ -135,9 +135,38 @@ td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
 tr.kept { background: rgba(0,255,136,0.06); }
 tr.reverted { background: rgba(255,68,68,0.06); }
 tr.active-row { animation: rowPulse 1.5s infinite; }
+tr.iter-row { cursor: pointer; transition: background 0.15s; }
+tr.iter-row:hover { background: rgba(0,210,255,0.08); }
+tr.iter-row.selected { background: rgba(0,210,255,0.15); border-left: 3px solid var(--accent); }
 @keyframes rowPulse {
   0%, 100% { background: rgba(0,210,255,0.05); }
   50% { background: rgba(0,210,255,0.12); }
+}
+
+/* ── Detail panel ── */
+#detail-panel {
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 14px;
+  margin-bottom: 12px;
+  display: none;
+}
+#detail-panel.visible { display: block; }
+#detail-panel h3 { color: var(--accent); margin-bottom: 8px; }
+.detail-section { margin-bottom: 12px; }
+.detail-section h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+.reasoning-text {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text);
+  max-height: 400px;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.3);
+  padding: 10px;
+  border-radius: 4px;
 }
 
 /* ── Progress bar ── */
@@ -295,8 +324,24 @@ tr.active-row { animation: rowPulse 1.5s infinite; }
     </table>
   </div>
 
+  <div id="detail-panel">
+    <h3 id="detail-title">Iteration Details</h3>
+    <div class="detail-section">
+      <h4>Claude's Analysis</h4>
+      <div class="reasoning-text" id="detail-reasoning">Click an iteration row to see Claude's full reasoning...</div>
+    </div>
+    <div class="detail-section">
+      <h4>Failure Breakdown</h4>
+      <div id="detail-failures" style="font-size:12px;"></div>
+    </div>
+    <div class="detail-section">
+      <h4>Config Snapshot</h4>
+      <div class="reasoning-text" id="detail-config" style="max-height:200px;font-size:11px;"></div>
+    </div>
+  </div>
+
   <div class="card">
-    <h3>Claude's Reasoning (Learnings)</h3>
+    <h3>Accumulated Learnings</h3>
     <div class="learnings-box" id="opt-learnings">No learnings yet...</div>
   </div>
 </div>
@@ -314,6 +359,38 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // ── Polling ──
 let equityHistory = [];
+let iterationData = [];  // Store full iteration data for detail panel
+let selectedIteration = -1;
+
+function showIterationDetail(idx) {
+  const panel = document.getElementById('detail-panel');
+  const it = iterationData[idx];
+  if (!it) { panel.classList.remove('visible'); return; }
+
+  selectedIteration = idx;
+  panel.classList.add('visible');
+  document.getElementById('detail-title').textContent = `Iteration ${idx + 1}: ${it.run_id || ''}`;
+
+  // Claude's reasoning
+  const reasoning = it.claude_reasoning || '(Claude has not analyzed this iteration yet - reasoning is captured after Claude runs)';
+  document.getElementById('detail-reasoning').textContent = reasoning;
+
+  // Failure breakdown
+  const fb = it.challenge_simulation?.failure_breakdown || {};
+  const fbHtml = Object.keys(fb).length > 0
+    ? Object.entries(fb).map(([k,v]) => `<span style="color:var(--warn);margin-right:12px;">${k}: ${v}</span>`).join('')
+    : '<span style="color:var(--muted)">No failure data</span>';
+  document.getElementById('detail-failures').innerHTML = fbHtml;
+
+  // Config
+  const cfg = it.config_snapshot || {};
+  document.getElementById('detail-config').textContent = JSON.stringify(cfg, null, 2);
+
+  // Highlight selected row
+  document.querySelectorAll('.iter-row').forEach((r, i) => {
+    r.classList.toggle('selected', i === idx);
+  });
+}
 
 async function pollLive() {
   try {
@@ -400,7 +477,10 @@ async function pollOpt() {
     document.getElementById('opt-ph1').textContent = bestPh1;
     document.getElementById('opt-ph2').textContent = bestPh2;
 
-    // Iteration table
+    // Store iteration data for detail panel
+    iterationData = iters;
+
+    // Iteration table with clickable rows
     const tbody = document.getElementById('opt-table-body');
     tbody.innerHTML = iters.map((it, i) => {
       const m = it.metrics || {};
@@ -417,16 +497,23 @@ async function pollOpt() {
         ? Object.entries(fb).sort((a,b) => b[1]-a[1])[0][0]
         : '--';
       const isLast = i === iters.length - 1;
-      const cls = isLast ? 'active-row' : '';
-      return `<tr class="${cls}">
+      const hasReasoning = it.claude_reasoning ? ' title="Click to view Claude\'s analysis"' : '';
+      const selCls = i === selectedIteration ? ' selected' : '';
+      const cls = `iter-row${isLast ? ' active-row' : ''}${selCls}`;
+      return `<tr class="${cls}" onclick="showIterationDetail(${i})"${hasReasoning}>
         <td>${i + 1}</td>
         <td style="font-weight:700">${pr}%</td>
         <td>${ph1}/${tw}</td><td>${ph2}/${tw}</td>
         <td>${trades}</td><td>${wr}%</td><td>${sharpe}</td>
         <td style="color:var(--warn)">${topFail}</td>
-        <td>--</td>
+        <td>${it.claude_reasoning ? '...' : '--'}</td>
       </tr>`;
     }).join('');
+
+    // Auto-show detail for selected iteration
+    if (selectedIteration >= 0 && selectedIteration < iters.length) {
+      showIterationDetail(selectedIteration);
+    }
 
     // Pass rate chart
     if (iters.length > 0) drawPassRateChart(iters);

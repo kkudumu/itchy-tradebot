@@ -86,7 +86,7 @@ confluence_scoring:
 
 # 12. Equity curve filter — reduce size when equity dips below its MA
 equity_curve:
-  enabled: false
+  enabled: true
   params:
     lookback_trades: 20        # Rolling window of closed trades
     reduced_size_multiplier: 0.5

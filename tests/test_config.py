@@ -108,7 +108,7 @@ class TestEdgeToggles:
     # Individual edge defaults from edges.yaml
     def test_time_of_day_defaults(self) -> None:
         e = self._cfg.edges.time_of_day
-        assert e.enabled is True
+        assert e.enabled is False  # Disabled: strategies have built-in session logic
         assert e.params["start_utc"] == "06:00"
         assert e.params["end_utc"] == "21:00"
 
@@ -162,7 +162,7 @@ class TestEdgeToggles:
 
     def test_equity_curve_defaults(self) -> None:
         e = self._cfg.edges.equity_curve
-        assert e.enabled is False
+        assert e.enabled is True  # Enabled: reduces size when equity dips below MA
         assert e.params["lookback_trades"] == 20
 
     def test_toggle_edge_off_via_yaml(self, tmp_config_dir: Path) -> None:

@@ -135,6 +135,8 @@ def _make_handler(reports_dir: Path, live_dashboard: Optional[Any] = None):
                         "metrics": data.get("metrics", {}),
                         "challenge_simulation": data.get("challenge_simulation", {}),
                         "config_snapshot": data.get("config_snapshot", {}),
+                        "claude_reasoning": data.get("claude_reasoning", ""),
+                        "claude_prompt": data.get("claude_prompt", ""),
                     })
                 except (json.JSONDecodeError, OSError):
                     continue
