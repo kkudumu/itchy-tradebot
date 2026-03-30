@@ -124,6 +124,7 @@ class OptimizationLoop:
             db_pool=db_pool,
             embedding_engine=embedding_engine,
         )
+        self._consecutive_empty: int = 0
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -296,6 +297,16 @@ class OptimizationLoop:
             logger.info("Spawning Claude CLI for iteration %d …", iteration)
             claude_output = self._spawn_claude(prompt)
             logger.info("Claude output (%d chars): %s", len(claude_output), claude_output[:200] if claude_output else "(empty)")
+
+            # Detect sustained rate limiting — stop loop early
+            if not claude_output.strip():
+                self._consecutive_empty += 1
+                if self._consecutive_empty >= 2:
+                    stop_reason = "rate_limited"
+                    logger.warning("Two consecutive empty Claude outputs — likely rate limited. Stopping.")
+                    break
+            else:
+                self._consecutive_empty = 0
 
             # Save Claude's full reasoning to the iteration report
             _reasoning_path = Path(self._exporter._reports_dir) / f"{run_id}_claude_reasoning.txt"
@@ -600,43 +611,120 @@ class OptimizationLoop:
     def _spawn_claude(self, prompt: str) -> str:
         """Run Claude CLI with *prompt* on stdin and return stdout.
 
-        Uses the command and timeout from ``config.claude``.
+        Detects rate-limit responses ("You've hit your limit") and retries
+        after a delay.  When all retries fail and ``config.claude.codex_fallback``
+        is enabled, falls back to ``codex exec --yolo``.
+
         Returns an empty string if Claude is not installed or times out.
         """
+        import re
+        import time
+
         claude_cfg = self._config.get("claude", {})
         command: List[str] = claude_cfg.get(
             "command", ["claude", "-p", "--dangerously-skip-permissions"]
         )
         timeout: int = int(claude_cfg.get("timeout_seconds", 300))
+        max_retries: int = int(claude_cfg.get("rate_limit_retries", 1))
+        codex_fallback: bool = bool(claude_cfg.get("codex_fallback", False))
 
+        for attempt in range(1 + max_retries):
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=str(_REPO_ROOT),
+                    encoding="utf-8",
+                )
+                output = completed.stdout or ""
+
+                # Detect rate limit
+                if re.search(r"(?i)you.ve hit your limit|rate.limit|resets?\s+\d", output):
+                    # Try to parse reset time for smarter sleep
+                    wait = 60  # default 60s
+                    m = re.search(r"resets?\s+(\d+)\s*m", output, re.IGNORECASE)
+                    if m:
+                        wait = int(m.group(1)) * 60
+                        wait = min(wait, 300)  # cap at 5 minutes
+
+                    if attempt < max_retries:
+                        logger.warning(
+                            "_spawn_claude: Rate limited (attempt %d/%d). Waiting %ds before retry.",
+                            attempt + 1, 1 + max_retries, wait,
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        logger.warning(
+                            "_spawn_claude: Rate limited after %d attempts.", 1 + max_retries,
+                        )
+                        # Try codex fallback
+                        if codex_fallback:
+                            return self._spawn_codex_fallback(prompt, timeout)
+                        return ""
+
+                if completed.returncode != 0:
+                    logger.warning(
+                        "_spawn_claude: Claude exited with code %d. stderr: %s",
+                        completed.returncode,
+                        completed.stderr[:500] if completed.stderr else "",
+                    )
+                return output
+
+            except FileNotFoundError:
+                logger.error(
+                    "_spawn_claude: Claude CLI not found. "
+                    "Install with: npm install -g @anthropic-ai/claude-code"
+                )
+                if codex_fallback:
+                    return self._spawn_codex_fallback(prompt, timeout)
+                return ""
+            except subprocess.TimeoutExpired:
+                logger.error("_spawn_claude: Claude CLI timed out after %ds.", timeout)
+                return ""
+            except OSError as exc:
+                logger.error("_spawn_claude: OS error spawning Claude: %s", exc)
+                return ""
+
+        return ""
+
+    def _spawn_codex_fallback(self, prompt: str, timeout: int) -> str:
+        """Fall back to Codex CLI when Claude is rate-limited.
+
+        Uses ``codex exec --yolo`` with the same prompt.
+        Returns empty string on failure.
+        """
+        logger.info("_spawn_codex_fallback: Attempting Codex CLI fallback.")
         try:
             completed = subprocess.run(
-                command,
-                input=prompt,
+                ["codex", "exec", "--yolo", prompt[:8000]],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 cwd=str(_REPO_ROOT),
                 encoding="utf-8",
             )
+            output = completed.stdout or ""
             if completed.returncode != 0:
                 logger.warning(
-                    "_spawn_claude: Claude exited with code %d. stderr: %s",
+                    "_spawn_codex_fallback: Codex exited with code %d. stderr: %s",
                     completed.returncode,
                     completed.stderr[:500] if completed.stderr else "",
                 )
-            return completed.stdout or ""
+            else:
+                logger.info("_spawn_codex_fallback: Codex returned %d chars.", len(output))
+            return output
         except FileNotFoundError:
-            logger.error(
-                "_spawn_claude: Claude CLI not found. "
-                "Install with: npm install -g @anthropic-ai/claude-code"
-            )
+            logger.error("_spawn_codex_fallback: Codex CLI not found.")
             return ""
         except subprocess.TimeoutExpired:
-            logger.error("_spawn_claude: Claude CLI timed out after %ds.", timeout)
+            logger.error("_spawn_codex_fallback: Codex timed out after %ds.", timeout)
             return ""
         except OSError as exc:
-            logger.error("_spawn_claude: OS error spawning Claude: %s", exc)
+            logger.error("_spawn_codex_fallback: OS error: %s", exc)
             return ""
 
     def _detect_changes(self) -> str:

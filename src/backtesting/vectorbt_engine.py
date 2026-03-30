@@ -349,6 +349,17 @@ class IchimokuBacktester:
         total_signals = 0
         skipped_signals = 0
 
+        # Pipeline diagnostics — tracks signal attrition at each stage
+        _pipeline_counts = {
+            "signals_generated": 0,
+            "signals_filtered_in_trade": 0,
+            "signals_filtered_no_open": 0,
+            "signals_filtered_edge": 0,
+            "signals_filtered_learning": 0,
+            "signals_filtered_open_rejected": 0,
+            "signals_entered": 0,
+        }
+
         # Live dashboard setup
         import time as _time_mod
         _bt_start_time = _time_mod.monotonic()
@@ -427,6 +438,7 @@ class IchimokuBacktester:
                         _sig = None
                     if _sig is not None:
                         _bar_strategy_signals.append(_sig)
+                        _pipeline_counts["signals_generated"] += 1
                 except Exception:
                     pass
 
@@ -434,6 +446,8 @@ class IchimokuBacktester:
             # Manage open trade
             # ------------------------------------------------------------------
             if active_trade_id is not None and active_trade is not None:
+                if _bar_strategy_signals:
+                    _pipeline_counts["signals_filtered_in_trade"] += len(_bar_strategy_signals)
                 candles_since_entry += 1
 
                 kijun_5m = float(row_5m.get("kijun", np.nan))
@@ -550,6 +564,7 @@ class IchimokuBacktester:
                         ichi_signal = self._scan_for_signal(tf_data, bar_idx, instrument)
                         if ichi_signal is not None:
                             all_signals.append(ichi_signal)
+                            _pipeline_counts["signals_generated"] += 1
 
                     # Pick best signal
                     signal = self._signal_blender.select(all_signals) if all_signals else None
@@ -574,6 +589,7 @@ class IchimokuBacktester:
 
                         if not entry_allowed:
                             skipped_signals += 1
+                            _pipeline_counts["signals_filtered_edge"] += 1
                             logger.debug(
                                 "Signal at %s blocked by edge: %s",
                                 ts.isoformat(),
@@ -594,6 +610,7 @@ class IchimokuBacktester:
                                     skipped_signals += 1
                                     learning_skipped += 1
                                     learning_blocked = True
+                                    _pipeline_counts["signals_filtered_learning"] += 1
                                     logger.debug(
                                         "Signal at %s blocked by learning (%s): %s",
                                         ts.isoformat(),
@@ -628,6 +645,7 @@ class IchimokuBacktester:
                                     active_trade = trade_obj
                                     active_signal = signal
                                     candles_since_entry = 0
+                                    _pipeline_counts["signals_entered"] += 1
 
                                     # Capture entry context for embedding
                                     active_context = self._build_entry_context(
@@ -652,6 +670,11 @@ class IchimokuBacktester:
                                 except RuntimeError as exc:
                                     logger.debug("Trade open rejected: %s", exc)
                                     skipped_signals += 1
+                                    _pipeline_counts["signals_filtered_open_rejected"] += 1
+                else:
+                    # can_open_trade returned False (circuit breaker / max concurrent)
+                    if _bar_strategy_signals:
+                        _pipeline_counts["signals_filtered_no_open"] += len(_bar_strategy_signals)
 
             # Record equity at this bar
             equity_records.append((ts, balance))
@@ -809,6 +832,21 @@ class IchimokuBacktester:
                 })
 
         # ------------------------------------------------------------------
+        # Pipeline diagnostics summary
+        # ------------------------------------------------------------------
+        logger.info(
+            "Pipeline: generated=%d | filtered_in_trade=%d | filtered_no_open=%d | "
+            "filtered_edge=%d | filtered_learning=%d | filtered_open_rejected=%d | entered=%d",
+            _pipeline_counts["signals_generated"],
+            _pipeline_counts["signals_filtered_in_trade"],
+            _pipeline_counts["signals_filtered_no_open"],
+            _pipeline_counts["signals_filtered_edge"],
+            _pipeline_counts["signals_filtered_learning"],
+            _pipeline_counts["signals_filtered_open_rejected"],
+            _pipeline_counts["signals_entered"],
+        )
+
+        # ------------------------------------------------------------------
         # Force-close any trade still open at end of data
         # ------------------------------------------------------------------
         if active_trade_id is not None and active_trade is not None and not df_5m.empty:
@@ -871,6 +909,8 @@ class IchimokuBacktester:
             equity_curve=equity_curve,
             initial_balance=self._initial_balance,
         )
+
+        metrics["pipeline_counts"] = _pipeline_counts
 
         prop_status = self.prop_firm_tracker.check_pass()
 

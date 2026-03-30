@@ -656,7 +656,7 @@ class TestRunLoop:
 
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             with patch("subprocess.run") as mock_sub:
-                mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
+                mock_sub.return_value = MagicMock(returncode=0, stdout="no changes needed", stderr="")
                 summary = loop.run()
         assert summary["stop_reason"] == "plateau"
 
@@ -1027,3 +1027,61 @@ class TestLoadLoopConfig:
     def test_returns_empty_dict_on_missing_file(self, tmp_path, loop_mod):
         result = loop_mod.load_loop_config(tmp_path / "nonexistent.yaml")
         assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# 15. Rate-limit detection
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitDetection:
+    """Verify that _spawn_claude detects rate limits and retries."""
+
+    def test_detects_rate_limit_in_output(self, basic_loop, monkeypatch):
+        """When Claude returns rate-limit text, _spawn_claude retries once then returns output."""
+        call_count = 0
+        def fake_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = type('R', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+            if call_count == 1:
+                result.stdout = "You've hit your limit - resets 2pm"
+            else:
+                result.stdout = "I'll change stop_multiplier to 1.8"
+            return result
+        monkeypatch.setattr("subprocess.run", fake_run)
+        output = basic_loop._spawn_claude("test prompt")
+        assert call_count == 2
+        assert "stop_multiplier" in output
+
+    def test_rate_limit_all_retries_exhausted(self, basic_loop, monkeypatch):
+        """When all retries are rate-limited, returns empty string."""
+        def fake_run(*args, **kwargs):
+            result = type('R', (), {'returncode': 0, 'stdout': "You've hit your limit - resets 5pm", 'stderr': ''})()
+            return result
+        monkeypatch.setattr("subprocess.run", fake_run)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        output = basic_loop._spawn_claude("test prompt")
+        assert output == ""
+
+    def test_codex_fallback_on_rate_limit(self, basic_loop, monkeypatch):
+        """When Claude is rate-limited and codex is configured, falls back to codex."""
+        call_args = []
+        def fake_run(*args, **kwargs):
+            call_args.append(args[0] if args else kwargs.get('args'))
+            result = type('R', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+            cmd = args[0] if args else kwargs.get('args', [])
+            if 'claude' in str(cmd):
+                result.stdout = "You've hit your limit - resets 5pm"
+            else:
+                result.stdout = "Changed config parameter"
+            return result
+        monkeypatch.setattr("subprocess.run", fake_run)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        basic_loop._config.setdefault("claude", {})["codex_fallback"] = True
+        output = basic_loop._spawn_claude("test prompt")
+        assert "Changed config parameter" in output
+
+    def test_consecutive_empty_counter_init(self, basic_loop):
+        """Verify _consecutive_empty is initialized to 0."""
+        assert basic_loop._consecutive_empty == 0
