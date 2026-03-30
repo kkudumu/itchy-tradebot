@@ -646,7 +646,7 @@ class TestRunLoop:
         call_count = [0]
         pass_rate_values = [0.300, 0.302, 0.304, 0.306, 0.308, 0.310]
 
-        def _fake_run(df):
+        def _fake_run(df, **kwargs):
             idx = min(call_count[0], len(pass_rate_values) - 1)
             call_count[0] += 1
             return _FakeResult(sharpe=1.0, pass_rate=pass_rate_values[idx])
@@ -725,7 +725,7 @@ class TestRevertOnWorsening:
         ]
         run_idx = [0]
 
-        def _alternating_run(df):
+        def _alternating_run(df, **kwargs):
             result = run_values[min(run_idx[0], len(run_values) - 1)]
             run_idx[0] += 1
             return result
@@ -767,7 +767,7 @@ class TestRevertOnWorsening:
         ]
         run_idx = [0]
 
-        def _alternating_run(df):
+        def _alternating_run(df, **kwargs):
             result = run_values[min(run_idx[0], len(run_values) - 1)]
             run_idx[0] += 1
             return result
@@ -815,7 +815,7 @@ class TestLearningAppended:
         ]
         run_idx = [0]
 
-        def _run(df):
+        def _run(df, **kwargs):
             r = run_values[min(run_idx[0], len(run_values) - 1)]
             run_idx[0] += 1
             return r
@@ -889,7 +889,7 @@ class TestFinalValidation:
         results = [_FakeResult(sharpe=0.8, pass_rate=0.40), _FakeResult(sharpe=0.75, pass_rate=0.35)]
         call_idx = [0]
 
-        def _run(df):
+        def _run(df, **kwargs):
             r = results[min(call_idx[0], 1)]
             call_idx[0] += 1
             return r
