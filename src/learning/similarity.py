@@ -131,6 +131,34 @@ class SimilaritySearch:
         LIMIT %s
     """
 
+    _SIMILARITY_SQL_STRATEGY = """
+        SELECT
+            mc.trade_id,
+            mc.cloud_direction_4h,
+            mc.cloud_direction_1h,
+            mc.tk_cross_15m,
+            mc.session,
+            mc.adx_value,
+            mc.atr_value,
+            mc.rsi_value,
+            mc.nearest_sr_distance,
+            mc.zone_confluence_score,
+            t.r_multiple,
+            t.pnl,
+            t.direction,
+            t.confluence_score,
+            t.signal_tier,
+            1.0 - (mc.context_embedding <=> %s::vector) AS similarity
+        FROM market_context mc
+        JOIN trades t ON mc.trade_id = t.id
+        WHERE t.status = 'closed'
+          AND mc.strategy_tag = %s
+          AND mc.context_embedding IS NOT NULL
+          AND 1.0 - (mc.context_embedding <=> %s::vector) >= %s
+        ORDER BY mc.context_embedding <=> %s::vector
+        LIMIT %s
+    """
+
     def __init__(self, db_pool=None) -> None:
         self.db_pool = db_pool
 
@@ -144,6 +172,7 @@ class SimilaritySearch:
         k: int = 10,
         min_similarity: float = 0.7,
         source_filter: Optional[str] = None,
+        strategy_filter: Optional[str] = None,
     ) -> List[SimilarTrade]:
         """Find the k most similar historical trades via cosine similarity.
 
@@ -158,6 +187,13 @@ class SimilaritySearch:
         source_filter:
             Optional trade source ("backtest", "live", "paper") to limit
             the search scope.  None searches all sources.
+        strategy_filter:
+            Optional strategy identifier (e.g., 'ichimoku') to limit
+            results to trades tagged with that strategy.  None searches
+            all strategies.  Requires the ``strategy_tag`` column to
+            exist on ``market_context``; the parameter is additive and
+            backward-compatible (legacy trades without a tag are excluded
+            when a filter is specified).
 
         Returns
         -------
@@ -176,6 +212,11 @@ class SimilaritySearch:
                     cur.execute(
                         self._SIMILARITY_SQL_FILTERED,
                         (vector_str, source_filter, vector_str, min_similarity, vector_str, k),
+                    )
+                elif strategy_filter is not None:
+                    cur.execute(
+                        self._SIMILARITY_SQL_STRATEGY,
+                        (vector_str, strategy_filter, vector_str, min_similarity, vector_str, k),
                     )
                 else:
                     cur.execute(

@@ -40,13 +40,12 @@ class EdgeContext:
     adx: float
     atr: float
 
-    # Cloud context
-    cloud_thickness: float  # Absolute price distance between Senkou A and B
-    kijun_value: float      # Current Kijun-sen level used for breakout confirmation
+    # Strategy-provided indicator values (replaces cloud_thickness and kijun_value)
+    indicator_values: dict[str, float] = field(default_factory=dict)
 
     # Derived indicators
-    bb_squeeze: bool        # True when Bollinger Bands are in squeeze state
-    confluence_score: int   # 0–8 raw score from ConfluenceScorer
+    bb_squeeze: bool = False        # True when Bollinger Bands are in squeeze state
+    confluence_score: int = 0       # 0–8 raw score from ConfluenceScorer
 
     # Active trade state (None when evaluating entry edges)
     current_r: Optional[float] = None       # Unrealised profit in R multiples

@@ -164,6 +164,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Persist completed trades to database (requires DB connection).",
     )
     p.add_argument(
+        "--persist-trades",
+        action="store_true",
+        default=False,
+        help="Persist backtest trades to pgvector database.",
+    )
+    p.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -347,6 +353,28 @@ def run_backtest(args: argparse.Namespace) -> int:
     equity_path = output_dir / f"equity_curve_{ts}.csv"
     result.equity_curve.to_csv(equity_path)
     logger.info("Equity curve saved to %s", equity_path)
+
+    # Persist trades to pgvector if requested
+    if args.persist_trades:
+        try:
+            from src.database.connection import DatabasePool
+            from src.backtesting.trade_persistence import TradePersistence
+            from src.learning.embeddings import EmbeddingEngine
+
+            db_pool = DatabasePool()
+            db_pool.initialise()
+            persistence = TradePersistence(db_pool=db_pool, embedding_engine=EmbeddingEngine())
+            run_id = f"demo_{ts}"
+            config_dict = app_config.model_dump() if hasattr(app_config, "model_dump") else {}
+            n_persisted = persistence.persist_run(
+                run_id=run_id,
+                trades=result.trades,
+                config_snapshot=config_dict,
+                metrics=result.metrics,
+            )
+            logger.info("Persisted %d trades with run_id=%s", n_persisted, run_id)
+        except Exception as exc:
+            logger.warning("Trade persistence failed (continuing): %s", exc)
 
     # Generate static dashboard report (saved to disk, opens only if no live dashboard)
     try:

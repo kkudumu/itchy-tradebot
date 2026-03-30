@@ -42,13 +42,20 @@ class EmbeddingEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def create_embedding(self, context: Dict[str, Any]) -> np.ndarray:
+    def create_embedding(
+        self,
+        context: Dict[str, Any],
+        strategy_tag: Optional[str] = None,
+    ) -> np.ndarray:
         """Create a 64-dim embedding from a trade context dictionary.
 
         Parameters
         ----------
         context:
             Market / trade context dictionary.  Missing keys default to 0.
+        strategy_tag:
+            Optional strategy identifier (e.g., 'ichimoku'). Included in
+            context metadata but NOT in the embedding vector itself.
 
         Returns
         -------
@@ -60,6 +67,7 @@ class EmbeddingEngine:
         self,
         trade_context: Dict[str, Any],
         trade_result: Optional[Dict[str, Any]] = None,
+        strategy_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create an embedding dict ready for database insertion.
 
@@ -72,6 +80,9 @@ class EmbeddingEngine:
             - ``r_multiple`` (float): R-multiple result (positive = win)
             - ``pnl`` (float): Profit/loss in account currency
             - ``win`` (bool): Whether the trade closed profitably
+        strategy_tag:
+            Optional strategy identifier (e.g., 'ichimoku'). Stored as
+            metadata alongside the embedding; not part of the vector.
 
         Returns
         -------
@@ -79,6 +90,7 @@ class EmbeddingEngine:
         - ``context_embedding`` (list[float], 64 elements)
         - ``outcome_r`` (float | None)
         - ``win`` (bool | None)
+        - ``strategy_tag`` (str | None)
         """
         embedding = self.feature_builder.build(trade_context)
 
@@ -86,6 +98,7 @@ class EmbeddingEngine:
             "context_embedding": embedding.tolist(),
             "outcome_r": None,
             "win": None,
+            "strategy_tag": strategy_tag,
         }
 
         if trade_result:

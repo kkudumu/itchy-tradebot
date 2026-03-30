@@ -14,6 +14,11 @@ Multi-objective (MultiObjective):
 
 Parameter space
 ---------------
+When a ``strategy_key`` is provided the parameter space is delegated to
+``strategy.suggest_params(trial)`` via ``STRATEGY_REGISTRY``.  When no
+strategy is registered for the key the class falls back to the original
+Ichimoku-specific parameter space (backward compatible).
+
 All Ichimoku periods are derived from a single ``ichimoku_scale`` float
 that preserves the canonical 1:3:6 ratio (tenkan:kijun:senkou_b).
 Additional parameters cover ADX threshold, ATR stop multiplier, take-
@@ -67,23 +72,31 @@ class PropFirmObjective:
     backtester:
         An instantiated ``IchimokuBacktester``.  A new one is constructed
         with each trial's parameters so the instance here is used only as
-        a template to copy configuration defaults.
+        a template to copy configuration defaults.  May be ``None`` when
+        *strategy_key* is provided and ``StrategyBacktester`` is available.
     data:
         1-minute OHLCV ``DataFrame`` (UTC DatetimeIndex) used for every
         backtest run.
     initial_balance:
         Starting account equity forwarded to the backtester.
+    strategy_key:
+        Key into ``STRATEGY_REGISTRY`` that selects the strategy whose
+        ``suggest_params`` defines the Optuna search space and whose
+        ``StrategyBacktester`` runs the backtest.  Defaults to
+        ``'ichimoku'`` for backward compatibility.
     """
 
     def __init__(
         self,
-        backtester: "IchimokuBacktester",
         data: pd.DataFrame,
         initial_balance: float = 10_000.0,
+        strategy_key: str = 'ichimoku',
+        backtester: "IchimokuBacktester" = None,
     ) -> None:
         self._backtester = backtester
         self._data = data
         self._initial_balance = initial_balance
+        self._strategy_key = strategy_key
 
     # ------------------------------------------------------------------
     # Optuna callable
@@ -155,16 +168,32 @@ class PropFirmObjective:
     def suggest_params(self, trial: optuna.Trial) -> dict:
         """Define and sample the parameter search space for one trial.
 
-        All Ichimoku periods derive from a single ``ichimoku_scale`` factor
-        applied to the canonical 9/26/52 base periods so the 1:3:6 ratio
-        is preserved throughout the search.
+        Delegates to ``strategy.suggest_params(trial)`` when the strategy
+        registered under ``self._strategy_key`` overrides that method and
+        returns a non-empty dict.  Falls back to the original Ichimoku-
+        specific parameter space when no strategy is found or the strategy
+        returns an empty dict (backward compatible).
+
+        All Ichimoku fallback periods derive from a single ``ichimoku_scale``
+        factor applied to the canonical 9/26/52 base periods so the 1:3:6
+        ratio is preserved throughout the search.
 
         Returns
         -------
         dict
-            Parameter dict suitable for passing directly to
-            ``IchimokuBacktester.__init__`` as *config*.
+            Parameter dict suitable for passing directly to a backtester
+            as *config*.
         """
+        from src.strategy.base import STRATEGY_REGISTRY
+
+        strategy_cls = STRATEGY_REGISTRY.get(self._strategy_key)
+        if strategy_cls is not None:
+            strategy = strategy_cls()
+            params = strategy.suggest_params(trial)
+            if params:
+                return params
+
+        # Fallback: original Ichimoku-specific params (backward compat).
         # Single scale factor — preserves 1:3:6 Ichimoku period ratio.
         scale = trial.suggest_float("ichimoku_scale", 0.7, 1.3)
         tenkan = max(3, round(_BASE_TENKAN * scale))
@@ -199,15 +228,27 @@ class PropFirmObjective:
     def _run_backtest(self, params: dict):
         """Construct a fresh backtester with *params* and run it.
 
+        Tries ``StrategyBacktester`` first (strategy-agnostic path).  Falls
+        back to ``IchimokuBacktester`` when ``StrategyBacktester`` is not
+        importable (backward compatible).
+
         Returns the ``BacktestResult`` or ``None`` on unhandled exception.
         """
         from src.backtesting.vectorbt_engine import IchimokuBacktester
 
         try:
-            backtester = IchimokuBacktester(
-                config=params,
-                initial_balance=self._initial_balance,
-            )
+            try:
+                from src.backtesting.vectorbt_engine import StrategyBacktester
+                backtester = StrategyBacktester(
+                    strategy_key=self._strategy_key,
+                    config=params,
+                    initial_balance=self._initial_balance,
+                )
+            except ImportError:
+                backtester = IchimokuBacktester(
+                    config=params,
+                    initial_balance=self._initial_balance,
+                )
             return backtester.run(self._data, log_trades=False)
         except Exception as exc:
             logger.debug("Trial backtest failed: %s", exc)
@@ -231,21 +272,32 @@ class MultiObjective:
     ----------
     backtester:
         ``IchimokuBacktester`` instance used as a configuration template.
+        May be ``None`` when *strategy_key* is provided and
+        ``StrategyBacktester`` is available.
     data:
         1-minute OHLCV ``DataFrame`` (UTC DatetimeIndex).
     initial_balance:
         Starting account equity.
+    strategy_key:
+        Key into ``STRATEGY_REGISTRY`` forwarded to the underlying
+        ``PropFirmObjective``.  Defaults to ``'ichimoku'``.
     """
 
     def __init__(
         self,
-        backtester: "IchimokuBacktester",
         data: pd.DataFrame,
         initial_balance: float = 10_000.0,
+        strategy_key: str = 'ichimoku',
+        backtester: "IchimokuBacktester" = None,
     ) -> None:
         # Delegate parameter sampling and backtest execution to
         # PropFirmObjective so the parameter space stays consistent.
-        self._single = PropFirmObjective(backtester, data, initial_balance)
+        self._single = PropFirmObjective(
+            data=data,
+            initial_balance=initial_balance,
+            strategy_key=strategy_key,
+            backtester=backtester,
+        )
 
     def __call__(self, trial: optuna.Trial) -> tuple[float, float, float]:
         """Return (sortino, -max_dd_pct, calmar) for NSGA-II.

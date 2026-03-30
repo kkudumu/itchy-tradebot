@@ -278,8 +278,7 @@ class TestEdgeFiltering:
             session="london",
             adx=30.0,
             atr=2.0,
-            cloud_thickness=5.0,
-            kijun_value=1899.0,
+            indicator_values={'kijun': 1899.0, 'cloud_thickness': 5.0},
             bb_squeeze=False,
             confluence_score=6,
         )

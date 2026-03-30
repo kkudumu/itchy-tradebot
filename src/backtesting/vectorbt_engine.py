@@ -866,8 +866,7 @@ class IchimokuBacktester:
             session=_session_from_hour(ts.hour),
             adx=_nan_to_zero(float(row_5m.get("adx") or htf_vals.get("adx_15m") or 0.0)),
             atr=atr,
-            cloud_thickness=cloud_thickness,
-            kijun_value=kijun_5m,
+            indicator_values={'kijun': kijun_5m, 'cloud_thickness': cloud_thickness},
             bb_squeeze=False,  # BB squeeze not computed at engine level
             confluence_score=confluence_score,
             current_r=current_r,
@@ -1155,6 +1154,111 @@ class IchimokuBacktester:
         daily_pnl = (close_aligned - open_aligned) / open_aligned
         daily_pnl.name = "daily_pnl"
         return daily_pnl
+
+
+# =============================================================================
+# StrategyBacktester
+# =============================================================================
+
+class StrategyBacktester:
+    """Strategy-agnostic backtester that delegates to the active strategy.
+
+    This is a transition wrapper: it loads the requested strategy from the
+    STRATEGY_REGISTRY, builds an EvaluatorCoordinator from the strategy's
+    declared evaluators, and delegates the actual bar-by-bar simulation to
+    IchimokuBacktester (which handles the full risk / edge pipeline).
+
+    Future strategies will have their own dedicated bar loop; for now this
+    ensures the StrategyBacktester API is stable and importable.
+
+    Parameters
+    ----------
+    strategy_key:
+        Key used to look up the strategy in STRATEGY_REGISTRY.
+        Default: 'ichimoku'.
+    config:
+        Optional configuration dict forwarded to both the strategy and the
+        underlying IchimokuBacktester.
+    initial_balance:
+        Starting account equity.  Default: 10 000.0.
+    data:
+        Optional pre-loaded 1-minute OHLCV DataFrame.  Can also be supplied
+        at ``run()`` time via the ``data_1m`` parameter.
+    """
+
+    def __init__(
+        self,
+        strategy_key: str = 'ichimoku',
+        config: dict = None,
+        initial_balance: float = 10_000.0,
+        data: pd.DataFrame = None,
+    ) -> None:
+        from src.strategy.base import STRATEGY_REGISTRY
+        from src.strategy.coordinator import EvaluatorCoordinator
+        import src.strategy.evaluators   # noqa: F401 — populates EVALUATOR_REGISTRY
+        import src.strategy.strategies   # noqa: F401 — populates STRATEGY_REGISTRY
+
+        if strategy_key not in STRATEGY_REGISTRY:
+            raise ValueError(
+                f"Strategy '{strategy_key}' not found in registry. "
+                f"Available: {list(STRATEGY_REGISTRY.keys())}"
+            )
+
+        strategy_cls = STRATEGY_REGISTRY[strategy_key]
+        self._strategy = strategy_cls(config=config) if config else strategy_cls()
+        self._coordinator = EvaluatorCoordinator(
+            self._strategy.required_evaluators,
+            warmup_bars=self._strategy.warmup_bars,
+        )
+
+        # Delegate to IchimokuBacktester for now (it handles the bar loop).
+        # This is a transition — future strategies will have their own loop.
+        self._backtester = IchimokuBacktester(
+            config=config,
+            initial_balance=initial_balance,
+        )
+
+        self._data = data
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
+    def run(self, data_1m: pd.DataFrame = None, **kwargs) -> BacktestResult:
+        """Run the backtest.
+
+        Parameters
+        ----------
+        data_1m:
+            1-minute OHLCV DataFrame.  If omitted the DataFrame supplied at
+            construction time (``data=``) is used.
+        **kwargs:
+            Forwarded verbatim to ``IchimokuBacktester.run()``.
+
+        Returns
+        -------
+        BacktestResult
+        """
+        candles = data_1m if data_1m is not None else self._data
+        if candles is None:
+            raise ValueError(
+                "No data provided. Pass data_1m to run() or supply data= at construction."
+            )
+        return self._backtester.run(candles_1m=candles, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def strategy(self):
+        """The instantiated Strategy object."""
+        return self._strategy
+
+    @property
+    def coordinator(self):
+        """The EvaluatorCoordinator built from strategy.required_evaluators."""
+        return self._coordinator
 
 
 # ---------------------------------------------------------------------------

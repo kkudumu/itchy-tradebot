@@ -103,6 +103,7 @@ class DecisionEngine:
         account_monitor=None,
         screenshot_capture=None,
         db_pool=None,
+        strategy_config=None,
     ) -> None:
         self._cfg = config or {}
         self._instrument = self._cfg.get("instrument", "XAUUSD")
@@ -124,6 +125,26 @@ class DecisionEngine:
         self.order_manager = order_manager
         self.account_monitor = account_monitor
         self.screenshot_capture = screenshot_capture
+
+        # Strategy interface (alternative to signal_engine)
+        if signal_engine is not None:
+            self._signal_engine = signal_engine
+            self._strategy = None
+            self._coordinator = None
+        else:
+            self._signal_engine = None
+            if strategy_config is not None:
+                from ..strategy.loader import StrategyLoader
+                from ..strategy.coordinator import EvaluatorCoordinator
+                loader = StrategyLoader(strategy_config)
+                self._strategy = loader.load()
+                self._coordinator = EvaluatorCoordinator(
+                    self._strategy.required_evaluators,
+                    warmup_bars=self._strategy.warmup_bars,
+                )
+            else:
+                self._strategy = None
+                self._coordinator = None
 
         # Lazy-import to avoid circular dependency at module level
         from .trade_logger import EngineTradeLogger
@@ -164,6 +185,9 @@ class DecisionEngine:
 
         # Bar counter for health monitor
         self._bar_idx = 0
+
+        # Last EvalMatrix produced by the coordinator (used in edge context and exit checks)
+        self._last_eval_matrix = None
 
         logger.info(
             "DecisionEngine initialised — instrument=%s mode=%s interval=%dM",
@@ -275,7 +299,21 @@ class DecisionEngine:
 
         # Step 4: check for a new entry signal
         signal = None
-        if self.signal_engine is not None:
+        self._last_eval_matrix = None  # reset per scan cycle
+        if self._strategy is not None and self._coordinator is not None:
+            # Strategy interface path
+            data_1m = data.get("1M")
+            if data_1m is None:
+                data_1m = data.get("M1")
+            if data_1m is not None and not data_1m.empty:
+                try:
+                    eval_matrix = self._coordinator.evaluate(data_1m, self._bar_idx)
+                    if eval_matrix is not None:
+                        self._last_eval_matrix = eval_matrix
+                        signal = self._strategy.decide(eval_matrix)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("strategy.decide failed: %s", exc)
+        elif self.signal_engine is not None:
             data_1m = data.get("1M")
             if data_1m is None:
                 data_1m = data.get("M1")
@@ -610,13 +648,43 @@ class DecisionEngine:
                     ))
                     continue
 
-                # Normal exit manager check (take-profit, trailing)
-                exit_decision = self.trade_manager.update_trade(
-                    trade_id=trade_id,
-                    current_price=current_price,
-                    kijun_value=kijun_value,
-                    higher_tf_kijun=higher_kijun,
-                )
+                # Strategy trading mode exit check (alternative to trade_manager)
+                eval_matrix = getattr(self, "_last_eval_matrix", None)
+                if self._strategy is not None and self._strategy.trading_mode is not None and eval_matrix is not None:
+                    trade_obj = self.trade_manager._active_trades.get(trade_id) if self.trade_manager is not None else None  # noqa: SLF001
+                    current_bar_data = {
+                        "close": current_price,
+                        "atr": 1.0,
+                    }
+                    try:
+                        strategy_exit = self._strategy.trading_mode.check_exit(
+                            trade_obj, current_bar_data, eval_matrix
+                        )
+                        if strategy_exit is not None and getattr(strategy_exit, "action", "hold") != "hold":
+                            exit_decision = strategy_exit
+                        else:
+                            exit_decision = self.trade_manager.update_trade(
+                                trade_id=trade_id,
+                                current_price=current_price,
+                                kijun_value=kijun_value,
+                                higher_tf_kijun=higher_kijun,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("strategy.trading_mode.check_exit failed: %s", exc)
+                        exit_decision = self.trade_manager.update_trade(
+                            trade_id=trade_id,
+                            current_price=current_price,
+                            kijun_value=kijun_value,
+                            higher_tf_kijun=higher_kijun,
+                        )
+                else:
+                    # Normal exit manager check (take-profit, trailing)
+                    exit_decision = self.trade_manager.update_trade(
+                        trade_id=trade_id,
+                        current_price=current_price,
+                        kijun_value=kijun_value,
+                        higher_tf_kijun=higher_kijun,
+                    )
 
                 if exit_decision.action == "full_exit":
                     self._close_trade_live(trade_id, current_price, exit_decision.reason)
@@ -783,6 +851,13 @@ class DecisionEngine:
                     for t in self.trade_manager.closed_trades
                 ]
 
+            # Use strategy's populate_edge_context if available, otherwise fall back
+            eval_matrix = getattr(self, "_last_eval_matrix", None)
+            if self._strategy is not None and eval_matrix is not None:
+                indicator_values = self._strategy.populate_edge_context(eval_matrix)
+            else:
+                indicator_values = {'kijun': kijun_value, 'cloud_thickness': cloud_thickness}
+
             return EdgeContext(
                 timestamp=ts,
                 day_of_week=day_of_week,
@@ -793,8 +868,7 @@ class DecisionEngine:
                 session=session,
                 adx=adx,
                 atr=atr,
-                cloud_thickness=cloud_thickness,
-                kijun_value=kijun_value,
+                indicator_values=indicator_values,
                 bb_squeeze=bb_squeeze,
                 confluence_score=confluence_score,
                 equity_curve=equity_curve,
@@ -846,8 +920,7 @@ class DecisionEngine:
                 session="unknown",
                 adx=0.0,
                 atr=atr,
-                cloud_thickness=0.0,
-                kijun_value=current_price,
+                indicator_values={},
                 bb_squeeze=False,
                 confluence_score=0,
                 current_r=current_r,

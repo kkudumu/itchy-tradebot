@@ -50,9 +50,13 @@ class OptunaOptimizer:
         ``WalkForwardAnalyzer``.
     config:
         Optional base strategy configuration dict forwarded to the
-        ``IchimokuBacktester`` constructor.
+        backtester constructor.
     initial_balance:
         Starting account equity used for every backtest.  Default: 10 000.
+    strategy_key:
+        Key into ``STRATEGY_REGISTRY`` that selects the strategy whose
+        ``suggest_params`` defines the Optuna search space.  Defaults to
+        ``'ichimoku'`` for backward compatibility.
     """
 
     def __init__(
@@ -60,14 +64,12 @@ class OptunaOptimizer:
         data: pd.DataFrame,
         config: Optional[dict] = None,
         initial_balance: float = 10_000.0,
+        strategy_key: str = 'ichimoku',
     ) -> None:
         self._data = data
         self._config = config or {}
         self._initial_balance = initial_balance
-
-        # Lazily construct the backtester template on first use so the
-        # optimizer can be instantiated without a live database connection.
-        self._backtester = None
+        self._strategy_key = strategy_key
 
     # ------------------------------------------------------------------
     # Public API
@@ -121,9 +123,9 @@ class OptunaOptimizer:
         )
 
         objective = PropFirmObjective(
-            backtester=self._get_backtester(),
             data=self._data,
             initial_balance=self._initial_balance,
+            strategy_key=self._strategy_key,
         )
 
         logger.info(
@@ -189,9 +191,9 @@ class OptunaOptimizer:
         )
 
         objective = MultiObjective(
-            backtester=self._get_backtester(),
             data=self._data,
             initial_balance=self._initial_balance,
+            strategy_key=self._strategy_key,
         )
 
         logger.info(
@@ -243,16 +245,6 @@ class OptunaOptimizer:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _get_backtester(self):
-        """Return a lazily constructed ``IchimokuBacktester`` template."""
-        if self._backtester is None:
-            from src.backtesting.vectorbt_engine import IchimokuBacktester
-            self._backtester = IchimokuBacktester(
-                config=self._config,
-                initial_balance=self._initial_balance,
-            )
-        return self._backtester
 
     @staticmethod
     def _scale_ichimoku_params(raw_params: dict) -> dict:

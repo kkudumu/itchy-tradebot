@@ -46,8 +46,12 @@ class CandleCloseConfirmationFilter(EdgeFilter):
                 reason="No signal direction available — candle close check skipped",
             )
 
+        kijun = context.indicator_values.get('kijun')
+        if kijun is None:
+            return EdgeResult(allowed=True, edge_name=self.name, reason="no kijun indicator — filter skipped")
+
         close = context.close_price
-        boundary = context.kijun_value
+        boundary = kijun
 
         if direction == "long":
             if close > boundary:
