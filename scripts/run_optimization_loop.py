@@ -156,6 +156,19 @@ class OptimizationLoop:
             len(opt_df),
         )
 
+        # Start live optimization dashboard
+        _dashboard = None
+        try:
+            from src.backtesting.optimization_dashboard import OptimizationDashboardServer
+            resolved_reports = self._config.get("persistence", {}).get("reports_dir", "reports")
+            _dashboard = OptimizationDashboardServer(
+                port=8502, reports_dir=str(resolved_reports), auto_open=True,
+            )
+            _dashboard.start()
+            logger.info("Optimization dashboard started at http://localhost:8502")
+        except Exception as exc:
+            logger.warning("Could not start optimization dashboard: %s", exc)
+
         history: List[Dict[str, Any]] = []
         best_metrics: Dict[str, Any] = {}
         best_config: Dict[str, Any] = {}
@@ -389,6 +402,13 @@ class OptimizationLoop:
             float(best_metrics.get("pass_rate", 0.0)) * 100,
             float(best_metrics.get("sharpe", 0.0)),
         )
+        # Stop dashboard
+        if _dashboard is not None:
+            try:
+                _dashboard.stop()
+            except Exception:
+                pass
+
         return summary
 
     # ------------------------------------------------------------------

@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtesting.multi_tf import BacktestDataPreparer
-from src.backtesting.metrics import PerformanceMetrics, PropFirmTracker
+from src.backtesting.metrics import PerformanceMetrics, PropFirmTracker, MultiPhasePropFirmTracker
 from src.backtesting.trade_logger import TradeLogger
 from src.edges.base import EdgeContext
 from src.edges.manager import EdgeManager
@@ -196,12 +196,30 @@ class IchimokuBacktester:
             stats_analyzer=self._memory_stats,
         )
 
-        # Prop firm tracker
+        # Prop firm tracker (legacy single-phase)
         self.prop_firm_tracker = PropFirmTracker(
             profit_target_pct=prop_firm_profit_target_pct,
             max_daily_dd_pct=prop_firm_max_daily_dd_pct,
             max_total_dd_pct=prop_firm_max_total_dd_pct,
             time_limit_days=prop_firm_time_limit_days,
+        )
+
+        # Multi-phase prop firm tracker (The5ers 2-Step)
+        prop_firm_cfg = cfg.get("prop_firm", {})
+        p1 = prop_firm_cfg.get("phase_1", {})
+        p2 = prop_firm_cfg.get("phase_2", {})
+        funded = prop_firm_cfg.get("funded", {})
+        self.multi_phase_tracker = MultiPhasePropFirmTracker(
+            account_size=float(prop_firm_cfg.get("account_size", initial_balance)),
+            phase_1_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
+            phase_1_max_loss_pct=float(p1.get("max_loss_pct", 10.0)),
+            phase_1_daily_loss_pct=float(p1.get("daily_loss_pct", 5.0)),
+            phase_2_profit_target_pct=float(p2.get("profit_target_pct", 5.0)),
+            phase_2_max_loss_pct=float(p2.get("max_loss_pct", 10.0)),
+            phase_2_daily_loss_pct=float(p2.get("daily_loss_pct", 5.0)),
+            funded_monthly_target_pct=float(funded.get("monthly_target_pct", 10.0)),
+            funded_max_loss_pct=float(funded.get("max_loss_pct", 10.0)),
+            funded_daily_loss_pct=float(funded.get("daily_loss_pct", 5.0)),
         )
 
         self._metrics_calc = PerformanceMetrics()
