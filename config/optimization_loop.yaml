@@ -1,10 +1,10 @@
 optimization:
   max_iterations: 10
-  target_sharpe: 1.0
+  target_pass_rate: 0.50
+  rolling_window_spacing_days: 22
   max_changes_per_iteration: 2
-  optimization_years: 2
-  plateau_threshold: 0.05  # 5% improvement minimum
-  plateau_iterations: 3    # number of stale iterations before stopping
+  plateau_threshold: 0.05
+  plateau_iterations: 3
 
 persistence:
   enabled: true
@@ -13,6 +13,7 @@ persistence:
 claude:
   command: ["claude", "-p", "--dangerously-skip-permissions"]
   timeout_seconds: 300
+  encoding: utf-8
 
 validation:
   run_full_dataset: true

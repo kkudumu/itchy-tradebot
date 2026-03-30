@@ -7,36 +7,36 @@
 time_of_day:
   enabled: true
   params:
-    start_utc: "08:00"
-    end_utc: "17:00"
+    start_utc: "06:00"
+    end_utc: "21:00"
 
 # 2. Day-of-week filter (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
 day_of_week:
-  enabled: true
+  enabled: false
   params:
     allowed_days: [1, 2, 3]  # Tuesday, Wednesday, Thursday
 
 # 3. London open delay — suppress entries for the first 30 min of the session
 london_open_delay:
-  enabled: true
+  enabled: false
   params:
     london_open_utc: "08:00"
     delay_minutes: 30
 
 # 4. Candle close confirmation — require H1 candle to close beyond the cloud
 candle_close_confirmation:
-  enabled: true
+  enabled: false
   params: {}
 
 # 5. Spread filter — skip when spread exceeds threshold (points)
 spread_filter:
-  enabled: true
+  enabled: false
   params:
     max_spread_points: 30  # 30 pts ≈ $0.30/oz for gold
 
 # 6. News filter — block entries around high-impact red-flag events
 news_filter:
-  enabled: true
+  enabled: false
   params:
     block_minutes_before: 30
     block_minutes_after: 30
@@ -52,21 +52,21 @@ friday_close:
 
 # 8. Regime filter — require trending conditions (ADX + cloud thickness)
 regime_filter:
-  enabled: true
+  enabled: false
   params:
     adx_min: 28
     cloud_thickness_percentile: 50  # Must be above the rolling median
 
 # 9. Time stop — exit at breakeven if trade stalls (< 0.5 R in N candles)
 time_stop:
-  enabled: true
+  enabled: false
   params:
     candle_limit: 12
     breakeven_r_threshold: 0.5
 
 # 10. Bollinger Band squeeze — boost confidence on expansion from squeeze
 bb_squeeze:
-  enabled: true
+  enabled: false
   params:
     bb_period: 20
     bb_std: 2.0
@@ -75,7 +75,7 @@ bb_squeeze:
 
 # 11. Confluence scoring — minimum score gate + tiered position sizing
 confluence_scoring:
-  enabled: true
+  enabled: false
   params:
     min_score: 4
     tier_a_plus_threshold: 7  # Full size
@@ -86,7 +86,7 @@ confluence_scoring:
 
 # 12. Equity curve filter — reduce size when equity dips below its MA
 equity_curve:
-  enabled: true
+  enabled: false
   params:
     lookback_trades: 20        # Rolling window of closed trades
     reduced_size_multiplier: 0.5
