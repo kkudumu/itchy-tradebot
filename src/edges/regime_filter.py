@@ -65,7 +65,12 @@ class RegimeFilter(EdgeFilter):
             return self._disabled_result()
 
         adx_ok = context.adx >= self._adx_min
-        cloud_ok = context.cloud_thickness >= self._cloud_min
+
+        cloud_thickness = context.indicator_values.get('cloud_thickness')
+        if cloud_thickness is None:
+            return EdgeResult(allowed=True, edge_name=self.name, reason="no cloud_thickness — filter skipped")
+
+        cloud_ok = cloud_thickness >= self._cloud_min
 
         reasons: list[str] = []
 
@@ -76,11 +81,11 @@ class RegimeFilter(EdgeFilter):
 
         if cloud_ok:
             reasons.append(
-                f"cloud thickness {context.cloud_thickness:.4f} ≥ {self._cloud_min:.4f}"
+                f"cloud thickness {cloud_thickness:.4f} ≥ {self._cloud_min:.4f}"
             )
         else:
             reasons.append(
-                f"cloud thickness {context.cloud_thickness:.4f} < {self._cloud_min:.4f} "
+                f"cloud thickness {cloud_thickness:.4f} < {self._cloud_min:.4f} "
                 f"(thin cloud)"
             )
 

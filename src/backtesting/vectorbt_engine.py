@@ -866,8 +866,7 @@ class IchimokuBacktester:
             session=_session_from_hour(ts.hour),
             adx=_nan_to_zero(float(row_5m.get("adx") or htf_vals.get("adx_15m") or 0.0)),
             atr=atr,
-            cloud_thickness=cloud_thickness,
-            kijun_value=kijun_5m,
+            indicator_values={'kijun': kijun_5m, 'cloud_thickness': cloud_thickness},
             bb_squeeze=False,  # BB squeeze not computed at engine level
             confluence_score=confluence_score,
             current_r=current_r,
