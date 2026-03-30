@@ -65,9 +65,10 @@ def _make_trade(direction: str = "long", r_multiple: float = 1.0) -> Dict[str, A
     }
 
 
-def _make_result(sharpe: float = 0.8, trades: Optional[List[Dict]] = None) -> Any:
+def _make_result(sharpe: float = 0.8, trades: Optional[List[Dict]] = None, pass_rate: float = 0.0) -> Any:
     """Return a BacktestResult-like object with controlled metrics."""
     from src.backtesting.vectorbt_engine import BacktestResult
+    from src.backtesting.challenge_simulator import ChallengeSimulationResult
 
     _trades = trades if trades is not None else [_make_trade()]
     metrics = {
@@ -85,6 +86,18 @@ def _make_result(sharpe: float = 0.8, trades: Optional[List[Dict]] = None) -> An
         "sortino": 1.1,
         "calmar": 0.9,
     }
+    challenge_sim = ChallengeSimulationResult(
+        total_windows=100,
+        phase_1_pass_count=int(pass_rate * 100),
+        phase_2_pass_count=int(pass_rate * 100),
+        full_pass_count=int(pass_rate * 100),
+        pass_rate=pass_rate,
+        rolling_pass_rate=pass_rate,
+        monte_carlo_pass_rate=pass_rate,
+        avg_days_phase_1=15.0,
+        avg_days_phase_2=10.0,
+        failure_breakdown={},
+    )
     return BacktestResult(
         trades=_trades,
         metrics=metrics,
@@ -102,6 +115,7 @@ def _make_result(sharpe: float = 0.8, trades: Optional[List[Dict]] = None) -> An
             [0.01],
             index=pd.date_range("2024-01-01", periods=1, freq="D", tz="UTC"),
         ),
+        challenge_simulation=challenge_sim,
     )
 
 
@@ -160,13 +174,13 @@ def _make_parquet(tmp_path: Path) -> Path:
 def _make_loop_config(
     tmp_path: Path,
     max_iterations: int = 3,
-    target_sharpe: float = 2.0,
+    target_pass_rate: float = 0.90,
     persistence_enabled: bool = False,
 ) -> Dict[str, Any]:
     return {
         "optimization": {
             "max_iterations": max_iterations,
-            "target_sharpe": target_sharpe,
+            "target_pass_rate": target_pass_rate,
             "max_changes_per_iteration": 2,
             "optimization_years": 2,
             "plateau_threshold": 0.05,
@@ -241,7 +255,7 @@ class TestFullLoopIntegration:
 
     def test_loop_runs_multiple_iterations(self, loop_mod, tmp_env):
         """Loop executes at least 2 iterations when target not yet met."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -259,8 +273,8 @@ class TestFullLoopIntegration:
         assert summary["total_iterations"] >= 2
 
     def test_loop_stops_when_target_reached(self, loop_mod, tmp_env):
-        """Loop stops after first iteration when Sharpe already exceeds target."""
-        cfg = _make_loop_config(tmp_env, max_iterations=5, target_sharpe=0.3)
+        """Loop stops after first iteration when pass rate already exceeds target."""
+        cfg = _make_loop_config(tmp_env, max_iterations=5, target_pass_rate=0.10)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -268,7 +282,7 @@ class TestFullLoopIntegration:
             claude_md_path=str(tmp_env / "CLAUDE.md"),
         )
 
-        mock_result = _make_result(sharpe=1.5)
+        mock_result = _make_result(sharpe=1.5, pass_rate=0.50)
 
         with patch.object(loop, "_run_backtest", return_value=mock_result), \
              patch.object(loop, "_spawn_claude", return_value=""), \
@@ -280,7 +294,7 @@ class TestFullLoopIntegration:
 
     def test_loop_stops_on_plateau(self, loop_mod, tmp_env):
         """Loop stops on plateau after 3 consecutive low-improvement iterations."""
-        cfg = _make_loop_config(tmp_env, max_iterations=10, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=10, target_pass_rate=0.99)
         cfg["optimization"]["plateau_iterations"] = 3
         cfg["optimization"]["plateau_threshold"] = 0.05
         loop = loop_mod.OptimizationLoop(
@@ -290,8 +304,8 @@ class TestFullLoopIntegration:
             claude_md_path=str(tmp_env / "CLAUDE.md"),
         )
 
-        # Same sharpe every iteration → plateau detected after 3
-        mock_result = _make_result(sharpe=0.8)
+        # Same pass rate every iteration → plateau detected after 3
+        mock_result = _make_result(sharpe=0.8, pass_rate=0.30)
 
         with patch.object(loop, "_run_backtest", return_value=mock_result), \
              patch.object(loop, "_spawn_claude", return_value=""), \
@@ -302,7 +316,7 @@ class TestFullLoopIntegration:
 
     def test_loop_exports_reports_each_iteration(self, loop_mod, tmp_env):
         """Each iteration creates a JSON report file in the reports directory."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -322,7 +336,7 @@ class TestFullLoopIntegration:
 
     def test_loop_returns_best_config_and_metrics(self, loop_mod, tmp_env):
         """Summary contains best_config and best_metrics keys."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -343,7 +357,7 @@ class TestFullLoopIntegration:
 
     def test_claude_prompt_contains_max_changes_constraint(self, loop_mod, tmp_env):
         """The Claude prompt includes the max-changes constraint."""
-        cfg = _make_loop_config(tmp_env, max_iterations=1, target_sharpe=0.1)
+        cfg = _make_loop_config(tmp_env, max_iterations=1, target_pass_rate=0.10)
         cfg["optimization"]["max_changes_per_iteration"] = 2
         loop = loop_mod.OptimizationLoop(
             config=cfg,
@@ -364,8 +378,8 @@ class TestFullLoopIntegration:
              patch.object(loop, "_detect_changes", return_value=""):
             loop.run()
 
-        # Loop stops at iteration 1 because target_sharpe=0.1 is reached
-        # So _spawn_claude may not be called; create the prompt directly.
+        # Loop stops at max_iterations=1; _spawn_claude may not be called.
+        # Create the prompt directly to test constraint text.
         report = {
             "run_id": "test_run",
             "metrics": {"sharpe": 0.5, "win_rate": 0.55},
@@ -387,29 +401,30 @@ class TestFullLoopIntegration:
         assert "1.23" in prompt
         assert "0.62" in prompt
 
-    def test_claude_prompt_includes_previous_comparison(self, loop):
-        """When a previous report is provided, comparison section appears in prompt."""
+    def test_claude_prompt_includes_challenge_simulation(self, loop):
+        """Prompt includes challenge simulation section from current report."""
         current_report = {
             "run_id": "iter_002",
-            "metrics": {"sharpe": 0.9},
-            "comparison": {
-                "has_previous": True,
-                "sharpe": {"delta": 0.1, "current": 0.9, "previous": 0.8},
-            },
-            "config_snapshot": {},
-        }
-        previous_report = {
-            "run_id": "iter_001",
-            "metrics": {"sharpe": 0.8},
+            "metrics": {"sharpe": 0.9, "win_rate": 0.62},
             "comparison": {},
             "config_snapshot": {},
+            "challenge_simulation": {
+                "pass_rate": 0.45,
+                "phase_1_pass_count": 45,
+                "full_pass_count": 30,
+                "total_windows": 100,
+                "avg_days_phase_1": 15,
+                "avg_days_phase_2": 10,
+                "failure_breakdown": {"daily_dd": 20, "total_dd": 5},
+            },
         }
-        prompt = loop._build_claude_prompt(current_report, previous_report, [], "")
-        assert "Previous Run Comparison" in prompt
+        prompt = loop._build_claude_prompt(current_report, None, [], "")
+        assert "Challenge Simulation Results" in prompt
+        assert "Failure Breakdown" in prompt
 
     def test_loop_iteration_history_populated(self, loop_mod, tmp_env):
         """iteration_history contains one entry per iteration with run_id and sharpe."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -441,7 +456,7 @@ class TestTradePersistenceIntegration:
 
     def test_persist_run_called_with_correct_run_id(self, loop_mod, tmp_env):
         """persist_run receives the run_id computed for each iteration."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0, persistence_enabled=True)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99, persistence_enabled=True)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -469,7 +484,7 @@ class TestTradePersistenceIntegration:
 
     def test_persist_run_skipped_when_persistence_disabled(self, loop_mod, tmp_env):
         """No calls to persist_run when persistence.enabled is False."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0, persistence_enabled=False)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99, persistence_enabled=False)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -490,7 +505,7 @@ class TestTradePersistenceIntegration:
 
     def test_persist_run_receives_trades_list(self, loop_mod, tmp_env):
         """persist_run is called with the trades list from the backtest result."""
-        cfg = _make_loop_config(tmp_env, max_iterations=1, target_sharpe=5.0, persistence_enabled=True)
+        cfg = _make_loop_config(tmp_env, max_iterations=1, target_pass_rate=0.99, persistence_enabled=True)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -516,7 +531,7 @@ class TestTradePersistenceIntegration:
 
     def test_different_run_ids_per_iteration(self, loop_mod, tmp_env):
         """Each iteration gets its own unique run_id in the opt_iter_NNN format."""
-        cfg = _make_loop_config(tmp_env, max_iterations=3, target_sharpe=5.0, persistence_enabled=True)
+        cfg = _make_loop_config(tmp_env, max_iterations=3, target_pass_rate=0.99, persistence_enabled=True)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -544,7 +559,7 @@ class TestTradePersistenceIntegration:
 
     def test_persist_no_db_graceful(self, loop_mod, tmp_env):
         """Loop completes without error when db_pool is None (no persistence)."""
-        cfg = _make_loop_config(tmp_env, max_iterations=1, target_sharpe=5.0, persistence_enabled=True)
+        cfg = _make_loop_config(tmp_env, max_iterations=1, target_pass_rate=0.99, persistence_enabled=True)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -573,7 +588,7 @@ class TestClaudeMdLearningIntegration:
 
     def test_learning_appended_after_each_iteration_with_changes(self, loop_mod, tmp_env):
         """append_learning is called once per iteration that detects changes."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -603,7 +618,7 @@ class TestClaudeMdLearningIntegration:
 
     def test_learning_entries_written_to_claude_md_file(self, loop_mod, tmp_env):
         """After loop completes, CLAUDE.md contains learning entries."""
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -624,14 +639,14 @@ class TestClaudeMdLearningIntegration:
         assert "Strategy Learnings" in content
 
     def test_kept_verdict_when_metrics_improve(self, loop_mod, tmp_env):
-        """When new Sharpe > old Sharpe after Claude change, verdict is 'kept'.
+        """When new pass rate >= old pass rate after Claude change, verdict is 'kept'.
 
         Flow for max_iterations=2:
-          iter 1: _run_backtest (result 0.5) → spawn Claude → detect changes →
-                  re-run (result 0.9) → append_learning(verdict='kept')
-          iter 2: _run_backtest (result 0.9) → last iter → break
+          iter 1: _run_backtest (pass_rate=0.20) -> spawn Claude -> detect changes ->
+                  re-run (pass_rate=0.40) -> append_learning(verdict='kept')
+          iter 2: _run_backtest (pass_rate=0.40) -> last iter -> break
         """
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -647,7 +662,7 @@ class TestClaudeMdLearningIntegration:
         diff_output = "- tenkan_period: 9\n+ tenkan_period: 12\n"
 
         # 3 backtest calls: iter1-initial, iter1-rerun-after-claude, iter2-initial
-        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.5), _make_result(0.9), _make_result(0.9)]), \
+        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.5, pass_rate=0.20), _make_result(0.9, pass_rate=0.40), _make_result(0.9, pass_rate=0.40)]), \
              patch.object(loop, "_spawn_claude", return_value="Changed tenkan"), \
              patch.object(loop, "_detect_changes", return_value=diff_output), \
              patch.object(loop._claude_writer, "append_learning", side_effect=_track_append):
@@ -656,14 +671,14 @@ class TestClaudeMdLearningIntegration:
         assert "kept" in verdicts
 
     def test_reverted_verdict_when_metrics_worsen(self, loop_mod, tmp_env):
-        """When new Sharpe < old Sharpe after Claude change, verdict is 'reverted'.
+        """When new pass rate < old pass rate after Claude change, verdict is 'reverted'.
 
         Flow for max_iterations=2:
-          iter 1: _run_backtest (0.8) → spawn Claude → detect changes →
-                  re-run (0.3) → _revert_changes → append_learning(verdict='reverted')
-          iter 2: _run_backtest (0.8) → last iter → break
+          iter 1: _run_backtest (pass_rate=0.40) -> spawn Claude -> detect changes ->
+                  re-run (pass_rate=0.10) -> _revert_changes -> append_learning(verdict='reverted')
+          iter 2: _run_backtest (pass_rate=0.40) -> last iter -> break
         """
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -678,7 +693,7 @@ class TestClaudeMdLearningIntegration:
 
         diff_output = "- tenkan_period: 9\n+ tenkan_period: 3\n"
 
-        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.8), _make_result(0.3), _make_result(0.8)]), \
+        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.8, pass_rate=0.40), _make_result(0.3, pass_rate=0.10), _make_result(0.8, pass_rate=0.40)]), \
              patch.object(loop, "_spawn_claude", return_value="Changed tenkan"), \
              patch.object(loop, "_detect_changes", return_value=diff_output), \
              patch.object(loop, "_revert_changes"), \
@@ -695,7 +710,7 @@ class TestClaudeMdLearningIntegration:
                   append_learning(changes='(no changes)', verdict='kept') → continue
           iter 2: _run_backtest (0.5) → last iter → break
         """
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -729,14 +744,14 @@ class TestRevertIntegration:
     """Integration tests verifying config revert when metrics worsen."""
 
     def test_git_checkout_called_when_metrics_worsen(self, loop_mod, tmp_env):
-        """When new Sharpe < old Sharpe, _revert_changes is called.
+        """When new pass rate < old pass rate, _revert_changes is called.
 
         Flow for max_iterations=2:
-          iter 1: backtest (0.8) → spawn Claude → detect changes →
-                  re-run (0.2) → _revert_changes called
-          iter 2: backtest (0.8) → last iter → break
+          iter 1: backtest (pass_rate=0.40) -> spawn Claude -> detect changes ->
+                  re-run (pass_rate=0.10) -> _revert_changes called
+          iter 2: backtest (pass_rate=0.40) -> last iter -> break
         """
-        cfg = _make_loop_config(tmp_env, max_iterations=2, target_sharpe=5.0)
+        cfg = _make_loop_config(tmp_env, max_iterations=2, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -751,7 +766,7 @@ class TestRevertIntegration:
 
         diff_output = "- kijun_period: 26\n+ kijun_period: 10\n"
 
-        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.8), _make_result(0.2), _make_result(0.8)]), \
+        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.8, pass_rate=0.40), _make_result(0.2, pass_rate=0.10), _make_result(0.8, pass_rate=0.40)]), \
              patch.object(loop, "_spawn_claude", return_value="Bad change"), \
              patch.object(loop, "_detect_changes", return_value=diff_output), \
              patch.object(loop, "_revert_changes", side_effect=_track_revert):
@@ -760,8 +775,8 @@ class TestRevertIntegration:
         assert revert_called["n"] == 1
 
     def test_git_checkout_not_called_when_metrics_improve(self, loop_mod, tmp_env):
-        """When new Sharpe >= old Sharpe, _revert_changes is NOT called."""
-        cfg = _make_loop_config(tmp_env, max_iterations=1, target_sharpe=5.0)
+        """When new pass rate >= old pass rate, _revert_changes is NOT called."""
+        cfg = _make_loop_config(tmp_env, max_iterations=1, target_pass_rate=0.99)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -771,7 +786,7 @@ class TestRevertIntegration:
 
         diff_output = "- tenkan_period: 9\n+ tenkan_period: 12\n"
 
-        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.5), _make_result(0.9)]), \
+        with patch.object(loop, "_run_backtest", side_effect=[_make_result(0.5, pass_rate=0.20), _make_result(0.9, pass_rate=0.40)]), \
              patch.object(loop, "_spawn_claude", return_value="Good change"), \
              patch.object(loop, "_detect_changes", return_value=diff_output) as mock_detect, \
              patch.object(loop, "_revert_changes") as mock_revert:
@@ -824,7 +839,7 @@ class TestForwardCompatibilityImports:
 
     def test_optimization_loop_uses_backtest_class(self, loop_mod, tmp_env):
         """OptimizationLoop._run_backtest instantiates _BacktesterClass with config."""
-        cfg = _make_loop_config(tmp_env, max_iterations=1, target_sharpe=0.1)
+        cfg = _make_loop_config(tmp_env, max_iterations=1, target_pass_rate=0.10)
         loop = loop_mod.OptimizationLoop(
             config=cfg,
             data_file=str(tmp_env / "data.parquet"),
@@ -833,7 +848,7 @@ class TestForwardCompatibilityImports:
         )
 
         called_configs: List[Dict] = []
-        mock_result = _make_result(sharpe=1.5)  # exceeds target so stops after 1
+        mock_result = _make_result(sharpe=1.5, pass_rate=0.50)  # exceeds target so stops after 1
 
         def _fake_backtest(df, config):
             called_configs.append(config)

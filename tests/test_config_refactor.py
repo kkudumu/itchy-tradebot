@@ -22,12 +22,12 @@ class TestStrategyYAML:
     def test_backward_compat_adx(self):
         cfg = load_config()
         assert cfg.strategy.adx.period == 14
-        assert cfg.strategy.adx.threshold == 28
+        assert cfg.strategy.adx.threshold == 20
 
     def test_backward_compat_atr(self):
         cfg = load_config()
         assert cfg.strategy.atr.period == 14
-        assert cfg.strategy.atr.stop_multiplier == 1.5
+        assert cfg.strategy.atr.stop_multiplier == 2.5
 
     def test_risk_config_unchanged(self):
         cfg = load_config()
@@ -35,7 +35,7 @@ class TestStrategyYAML:
 
     def test_exit_config_unchanged(self):
         cfg = load_config()
-        assert cfg.strategy.exit.tp_r_multiple == 2.0
+        assert cfg.strategy.exit.tp_r_multiple == 1.5
 
 
 class TestStrategyConfig:

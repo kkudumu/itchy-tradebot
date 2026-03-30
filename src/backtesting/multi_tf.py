@@ -48,6 +48,7 @@ _OHLCV_AGG = {
 _INDICATOR_COLS = [
     "tenkan", "kijun", "senkou_a", "senkou_b", "chikou",
     "adx", "adx_trending", "atr",
+    "ema_fast", "ema_mid", "ema_slow",
 ]
 
 
@@ -216,6 +217,12 @@ class BacktestDataPreparer:
         # ATR
         atr_arr = self._atr.calculate(high, low, close)
         df["atr"] = atr_arr
+
+        # EMA trio for EMA Pullback strategy (14, 18, 24 periods)
+        close_series = df["close"]
+        df["ema_fast"] = close_series.ewm(span=14, adjust=False).mean()
+        df["ema_mid"]  = close_series.ewm(span=18, adjust=False).mean()
+        df["ema_slow"] = close_series.ewm(span=24, adjust=False).mean()
 
         # CRITICAL: shift indicator columns forward by one bar.  This
         # ensures the bar-N close-derived value only appears on bar N+1.

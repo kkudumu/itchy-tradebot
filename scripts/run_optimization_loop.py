@@ -18,8 +18,8 @@ via subprocess.  Each iteration:
 
 Stopping conditions
 -------------------
-- Sharpe ratio exceeds ``target_sharpe``
-- Metrics plateau: 3 consecutive iterations with < 5% Sharpe improvement
+- Challenge pass rate meets or exceeds ``target_pass_rate``
+- Metrics plateau: 3 consecutive iterations with < 5% pass-rate improvement
 - Maximum iterations reached
 
 CLI usage
@@ -27,7 +27,7 @@ CLI usage
     python scripts/run_optimization_loop.py \\
         --data-file data/xauusd_1m.parquet \\
         --max-iterations 10 \\
-        --target-sharpe 1.0
+        --target-pass-rate 0.50
 
 Config is read from ``config/optimization_loop.yaml``; CLI flags override it.
 """
@@ -38,8 +38,6 @@ import argparse
 import json
 import logging
 import subprocess
-import sys
-import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -108,7 +106,7 @@ class OptimizationLoop:
         opt = config.get("optimization", {})
         pers = config.get("persistence", {})
         self._max_iterations: int = int(opt.get("max_iterations", 10))
-        self._target_sharpe: float = float(opt.get("target_sharpe", 1.0))
+        self._target_pass_rate: float = float(opt.get("target_pass_rate", 0.50))
         self._optimization_years: int = int(opt.get("optimization_years", 2))
         self._plateau_threshold: float = float(opt.get("plateau_threshold", 0.05))
         self._plateau_iterations: int = int(opt.get("plateau_iterations", 3))
@@ -158,6 +156,19 @@ class OptimizationLoop:
             len(opt_df),
         )
 
+        # Start live optimization dashboard
+        _dashboard = None
+        try:
+            from src.backtesting.optimization_dashboard import OptimizationDashboardServer
+            resolved_reports = self._config.get("persistence", {}).get("reports_dir", "reports")
+            _dashboard = OptimizationDashboardServer(
+                port=8502, reports_dir=str(resolved_reports), auto_open=True,
+            )
+            _dashboard.start()
+            logger.info("Optimization dashboard started at http://localhost:8502")
+        except Exception as exc:
+            logger.warning("Could not start optimization dashboard: %s", exc)
+
         history: List[Dict[str, Any]] = []
         best_metrics: Dict[str, Any] = {}
         best_config: Dict[str, Any] = {}
@@ -173,12 +184,23 @@ class OptimizationLoop:
             result = self._run_backtest(opt_df, config_snapshot)
             metrics = result.metrics if hasattr(result, "metrics") else result.get("metrics", {})
             current_sharpe = float(metrics.get("sharpe", 0.0))
+
+            # Get challenge simulation from result
+            challenge_sim = None
+            if hasattr(result, "challenge_simulation"):
+                challenge_sim = result.challenge_simulation
+            elif isinstance(result, dict):
+                challenge_sim = result.get("challenge_simulation")
+
+            current_pass_rate = challenge_sim.pass_rate if challenge_sim else 0.0
+
             logger.info(
-                "Iteration %d: Sharpe=%.3f  WinRate=%.1f%%  MaxDD=%.1f%%",
+                "Iteration %d: PassRate=%.1f%%  Sharpe=%.3f  WinRate=%.1f%%  Trades=%d",
                 iteration,
+                current_pass_rate * 100,
                 current_sharpe,
                 float(metrics.get("win_rate", 0.0)) * 100,
-                float(metrics.get("max_drawdown", 0.0)) * 100,
+                int(metrics.get("total_trades", metrics.get("trade_count", 0))),
             )
 
             # ---- Export report -----------------------------------------------
@@ -202,8 +224,9 @@ class OptimizationLoop:
                 )
 
             # ---- Update best -------------------------------------------------
-            if not best_metrics or current_sharpe > float(best_metrics.get("sharpe", float("-inf"))):
+            if not best_metrics or current_pass_rate > float(best_metrics.get("pass_rate", float("-inf"))):
                 best_metrics = dict(metrics)
+                best_metrics["pass_rate"] = current_pass_rate
                 best_config = dict(config_snapshot)
 
             entry = {
@@ -211,16 +234,17 @@ class OptimizationLoop:
                 "run_id": run_id,
                 "metrics": dict(metrics),
                 "sharpe": current_sharpe,
+                "pass_rate": current_pass_rate,
             }
             history.append(entry)
 
             # ---- Check target -----------------------------------------------
-            if current_sharpe >= self._target_sharpe:
+            if current_pass_rate >= self._target_pass_rate:
                 stop_reason = "target_reached"
                 logger.info(
-                    "Target Sharpe %.2f reached (current=%.3f). Stopping.",
-                    self._target_sharpe,
-                    current_sharpe,
+                    "Target pass rate %.0f%% reached (current=%.1f%%). Stopping.",
+                    self._target_pass_rate * 100,
+                    current_pass_rate * 100,
                 )
                 break
 
@@ -285,27 +309,39 @@ class OptimizationLoop:
             )
             new_sharpe = float(new_metrics.get("sharpe", 0.0))
 
+            # Get challenge simulation from new result
+            new_challenge_sim = None
+            if hasattr(new_result, "challenge_simulation"):
+                new_challenge_sim = new_result.challenge_simulation
+            elif isinstance(new_result, dict):
+                new_challenge_sim = new_result.get("challenge_simulation")
+            new_pass_rate = new_challenge_sim.pass_rate if new_challenge_sim else 0.0
+
             # ---- Decide keep / revert ---------------------------------------
-            if new_sharpe >= current_sharpe:
+            if new_pass_rate >= current_pass_rate:
                 verdict = "kept"
                 logger.info(
-                    "Config improved: Sharpe %.3f → %.3f. Keeping changes.",
+                    "Config improved: PassRate %.1f%% → %.1f%% (Sharpe %.3f → %.3f). Keeping changes.",
+                    current_pass_rate * 100,
+                    new_pass_rate * 100,
                     current_sharpe,
                     new_sharpe,
                 )
                 # Update best
-                if new_sharpe > float(best_metrics.get("sharpe", float("-inf"))):
+                if new_pass_rate > float(best_metrics.get("pass_rate", float("-inf"))):
                     best_metrics = dict(new_metrics)
+                    best_metrics["pass_rate"] = new_pass_rate
                     best_config = dict(new_config_snapshot)
                 # Update current iteration with new metrics
                 history[-1]["metrics"] = dict(new_metrics)
                 history[-1]["sharpe"] = new_sharpe
+                history[-1]["pass_rate"] = new_pass_rate
             else:
                 verdict = "reverted"
                 logger.info(
-                    "Config worsened: Sharpe %.3f → %.3f. Reverting.",
-                    current_sharpe,
-                    new_sharpe,
+                    "Config worsened: PassRate %.1f%% → %.1f%%. Reverting.",
+                    current_pass_rate * 100,
+                    new_pass_rate * 100,
                 )
                 self._revert_changes()
 
@@ -314,11 +350,13 @@ class OptimizationLoop:
                 run_id=run_id,
                 changes_made=self._summarise_diff(changes_diff),
                 metrics_before={
+                    "pass_rate": current_pass_rate,
                     "sharpe": metrics.get("sharpe"),
                     "win_rate": metrics.get("win_rate"),
                     "max_dd": metrics.get("max_drawdown"),
                 },
                 metrics_after={
+                    "pass_rate": new_pass_rate,
                     "sharpe": new_metrics.get("sharpe"),
                     "win_rate": new_metrics.get("win_rate"),
                     "max_dd": new_metrics.get("max_drawdown"),
@@ -338,8 +376,13 @@ class OptimizationLoop:
                 if hasattr(final_result, "metrics")
                 else final_result.get("metrics", {})
             )
+            final_challenge_sim = None
+            if hasattr(final_result, "challenge_simulation"):
+                final_challenge_sim = final_result.challenge_simulation
+            final_pass_rate = final_challenge_sim.pass_rate if final_challenge_sim else 0.0
             logger.info(
-                "Final validation: Sharpe=%.3f  WinRate=%.1f%%",
+                "Final validation: PassRate=%.1f%%  Sharpe=%.3f  WinRate=%.1f%%",
+                final_pass_rate * 100,
                 float(final_validation_metrics.get("sharpe", 0.0)),
                 float(final_validation_metrics.get("win_rate", 0.0)) * 100,
             )
@@ -354,10 +397,18 @@ class OptimizationLoop:
             "learnings_summary": self._claude_writer.get_learnings_summary(),
         }
         logger.info(
-            "Optimization complete. Stop reason: %s. Best Sharpe: %.3f",
+            "Optimization complete. Stop reason: %s. Best PassRate: %.1f%%  Best Sharpe: %.3f",
             stop_reason,
+            float(best_metrics.get("pass_rate", 0.0)) * 100,
             float(best_metrics.get("sharpe", 0.0)),
         )
+        # Stop dashboard
+        if _dashboard is not None:
+            try:
+                _dashboard.stop()
+            except Exception:
+                pass
+
         return summary
 
     # ------------------------------------------------------------------
@@ -378,44 +429,59 @@ class OptimizationLoop:
     ) -> str:
         """Build the structured prompt sent to Claude CLI.
 
-        The prompt includes: current metrics, previous-run comparison,
-        similar past configs from pgvector, accumulated learnings, and
-        a strict constraint to make at most ``max_changes_per_iteration``
-        parameter changes.
+        The prompt includes: challenge simulation results, failure breakdown,
+        secondary metrics, similar past configs from pgvector, accumulated
+        learnings, and a strict constraint to make at most
+        ``max_changes_per_iteration`` parameter changes.
         """
         run_id = report.get("run_id", "unknown")
         metrics = report.get("metrics", {})
-        comparison = report.get("comparison", {})
         config_snap = report.get("config_snapshot", {})
+        challenge_data = report.get("challenge_simulation")
 
         lines: List[str] = [
-            "You are a quantitative trading strategy optimizer.",
+            "You are a quantitative trading strategy optimizer for a The5ers 2-Step prop firm challenge.",
             "",
             f"## Current Run: {run_id}",
-            "### Performance Metrics",
-            f"- Sharpe Ratio:   {metrics.get('sharpe', 'N/A')}",
-            f"- Win Rate:       {metrics.get('win_rate', 'N/A')}",
-            f"- Max Drawdown:   {metrics.get('max_drawdown', 'N/A')}",
-            f"- Total Return:   {metrics.get('total_return', 'N/A')}",
-            f"- Profit Factor:  {metrics.get('profit_factor', 'N/A')}",
-            f"- Trade Count:    {metrics.get('trade_count', 'N/A')}",
-            f"- Expectancy:     {metrics.get('expectancy', 'N/A')}",
-            "",
         ]
 
-        # Previous run comparison
-        if previous_report and comparison.get("has_previous"):
-            prev_metrics = previous_report.get("metrics", {})
+        # Challenge simulation results
+        if challenge_data:
             lines += [
-                "## Previous Run Comparison",
-                f"- Previous Sharpe: {prev_metrics.get('sharpe', 'N/A')}",
-                f"- Sharpe delta:    {comparison.get('sharpe', {}).get('delta', 'N/A')}",
-                f"- WinRate delta:   {comparison.get('win_rate', {}).get('delta', 'N/A')}",
-                f"- MaxDD delta:     {comparison.get('max_drawdown', {}).get('delta', 'N/A')}",
+                "### Challenge Simulation Results",
+                f"- Pass Rate:              {challenge_data.get('pass_rate', 0):.1%}",
+                f"- Phase 1 Passes:         {challenge_data.get('phase_1_pass_count', 0)}/{challenge_data.get('total_windows', 0)}",
+                f"- Phase 2 Passes:         {challenge_data.get('full_pass_count', 0)}/{challenge_data.get('total_windows', 0)}",
+                f"- Avg Days Phase 1:       {challenge_data.get('avg_days_phase_1', 0):.0f}",
+                f"- Avg Days Phase 2:       {challenge_data.get('avg_days_phase_2', 0):.0f}",
+                "",
+                "### Failure Breakdown",
+            ]
+            failure_breakdown = challenge_data.get("failure_breakdown", {})
+            if failure_breakdown:
+                for reason, count in failure_breakdown.items():
+                    lines.append(f"- {reason}: {count}")
+                biggest_fail = max(failure_breakdown, key=failure_breakdown.get)
+                lines.append("")
+                lines.append(f"**BIGGEST FAILURE MODE: {biggest_fail}** -- prioritize fixing this.")
+            lines.append("")
+        else:
+            lines += [
+                "### Challenge Simulation Results",
+                "No challenge simulation data available (backtest may not have produced it).",
                 "",
             ]
-        else:
-            lines += ["## Previous Run Comparison", "No previous run available.", ""]
+
+        # Secondary metrics
+        lines += [
+            "### Secondary Metrics",
+            f"- Sharpe Ratio:   {metrics.get('sharpe', 'N/A')}",
+            f"- Win Rate:       {metrics.get('win_rate', 'N/A')}",
+            f"- Trade Count:    {metrics.get('trade_count', 'N/A')}",
+            f"- Max Drawdown:   {metrics.get('max_drawdown', 'N/A')}",
+            f"- Profit Factor:  {metrics.get('profit_factor', 'N/A')}",
+            "",
+        ]
 
         # Similar past configs
         if similar_configs:
@@ -453,23 +519,19 @@ class OptimizationLoop:
         # Instructions
         lines += [
             "## Your Task",
-            textwrap.dedent(f"""
-            Analyze the metrics above and suggest improvements to the strategy configuration.
-
-            STRICT CONSTRAINTS:
-            1. Make AT MOST {self._max_changes} parameter changes total across both config files.
-            2. Edit ONLY the following files:
-               - config/strategy.yaml
-               - config/edges.yaml
-            3. Do NOT change Python source files.
-            4. Each change must be justified by the data above.
-            5. Prioritize changes that address the biggest weakness visible in the metrics.
-
-            Target: Sharpe Ratio >= {self._target_sharpe:.2f}
-
-            Apply your changes directly to the config files now.
-            After making changes, output a brief explanation of what you changed and why.
-            """).strip(),
+            f"Improve the challenge pass rate. Target: >= {self._target_pass_rate:.0%}",
+            "",
+            "STRICT CONSTRAINTS:",
+            f"1. Make AT MOST {self._max_changes} parameter changes total across both config files.",
+            "2. Edit ONLY the following files:",
+            "   - config/strategy.yaml",
+            "   - config/edges.yaml",
+            "3. Do NOT change Python source files.",
+            "4. Each change must be justified by the data above.",
+            "5. Focus on the biggest failure mode above.",
+            "",
+            "Apply your changes directly to the config files now.",
+            "After making changes, explain what you changed and why.",
         ]
 
         return "\n".join(lines)
@@ -494,6 +556,7 @@ class OptimizationLoop:
                 text=True,
                 timeout=timeout,
                 cwd=str(_REPO_ROOT),
+                encoding="utf-8",
             )
             if completed.returncode != 0:
                 logger.warning(
@@ -577,7 +640,7 @@ class OptimizationLoop:
         -------
         bool
             ``True`` when ``plateau_iterations`` consecutive iterations each
-            improved Sharpe by less than ``plateau_threshold`` relative to
+            improved pass rate by less than ``plateau_threshold`` relative to
             the previous iteration.  ``False`` otherwise or when the history
             is shorter than ``plateau_iterations``.
         """
@@ -587,12 +650,12 @@ class OptimizationLoop:
 
         recent = history[-n:]
         for i in range(1, len(recent)):
-            prev_sharpe = float(recent[i - 1].get("sharpe", 0.0))
-            curr_sharpe = float(recent[i].get("sharpe", 0.0))
-            if prev_sharpe == 0.0:
+            prev_pass_rate = float(recent[i - 1].get("pass_rate", 0.0))
+            curr_pass_rate = float(recent[i].get("pass_rate", 0.0))
+            if prev_pass_rate == 0.0:
                 # Avoid division-by-zero; treat as improvement to be safe
                 return False
-            improvement = (curr_sharpe - prev_sharpe) / abs(prev_sharpe)
+            improvement = (curr_pass_rate - prev_pass_rate) / abs(prev_pass_rate)
             if improvement >= self._plateau_threshold:
                 return False
         return True
@@ -610,12 +673,53 @@ class OptimizationLoop:
         try:
             strategy_text = _STRATEGY_CONFIG_PATH.read_text(encoding="utf-8")
             strategy_cfg: Dict[str, Any] = yaml.safe_load(strategy_text) or {}
-            # Flatten nested dicts one level (e.g., ichimoku.tenkan_period → tenkan_period)
-            for section, values in strategy_cfg.items():
-                if isinstance(values, dict):
-                    config.update(values)
-                else:
-                    config[section] = values
+
+            # Determine the active strategy name
+            active = strategy_cfg.get("active_strategy", "ichimoku")
+
+            # Flatten the active strategy's sub-sections (ichimoku, adx, atr, signal)
+            # into top-level keys that IchimokuBacktester and SignalEngine expect.
+            strategy_params = strategy_cfg.get("strategies", {}).get(active, {})
+            _KEY_MAP = {
+                # strategies.ichimoku.atr.stop_multiplier -> atr_stop_multiplier
+                ("atr", "stop_multiplier"): "atr_stop_multiplier",
+                ("atr", "period"): "atr_period",
+                ("adx", "period"): "adx_period",
+                ("adx", "threshold"): "adx_threshold",
+                ("ichimoku", "tenkan_period"): "tenkan_period",
+                ("ichimoku", "kijun_period"): "kijun_period",
+                ("ichimoku", "senkou_b_period"): "senkou_b_period",
+                ("signal", "min_confluence_score"): "min_confluence_score",
+                ("signal", "tier_a_plus"): "tier_a_plus",
+                ("signal", "tier_b"): "tier_b",
+                ("signal", "tier_c"): "tier_c",
+                ("signal", "timeframes"): "timeframes",
+            }
+            for (section, key), flat_key in _KEY_MAP.items():
+                sub = strategy_params.get(section, {})
+                if isinstance(sub, dict) and key in sub:
+                    config[flat_key] = sub[key]
+
+            # Flatten risk and exit sections (already one level deep)
+            for section in ("risk", "exit"):
+                vals = strategy_cfg.get(section, {})
+                if isinstance(vals, dict):
+                    config.update(vals)
+
+            # Keep active_strategy for reference
+            config["active_strategy"] = active
+
+            # Expose prop_firm and active_strategies for challenge simulation
+            if "prop_firm" in strategy_cfg:
+                config["prop_firm"] = strategy_cfg["prop_firm"]
+            if "active_strategies" in strategy_cfg:
+                config["active_strategies"] = strategy_cfg["active_strategies"]
+
+            # Expose per-strategy configs (asian_breakout, ema_pullback) for multi-strategy backtesting
+            all_strategies = strategy_cfg.get("strategies", {})
+            for strat_name in ("asian_breakout", "ema_pullback"):
+                if strat_name in all_strategies:
+                    config[strat_name] = all_strategies[strat_name]
         except (OSError, yaml.YAMLError) as exc:
             logger.error("_load_config: failed to read strategy.yaml: %s", exc)
 
@@ -729,10 +833,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Override max iterations from config.",
     )
     parser.add_argument(
-        "--target-sharpe",
+        "--target-pass-rate",
         type=float,
         default=None,
-        help="Override target Sharpe ratio from config.",
+        help="Override target challenge pass rate from config (e.g. 0.50 for 50%%).",
     )
     parser.add_argument(
         "--config",
@@ -769,8 +873,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     opt = cfg.setdefault("optimization", {})
     if args.max_iterations is not None:
         opt["max_iterations"] = args.max_iterations
-    if args.target_sharpe is not None:
-        opt["target_sharpe"] = args.target_sharpe
+    if args.target_pass_rate is not None:
+        opt["target_pass_rate"] = args.target_pass_rate
 
     loop = OptimizationLoop(
         config=cfg,

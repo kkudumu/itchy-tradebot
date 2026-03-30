@@ -28,10 +28,14 @@ def _is_nan(v: float) -> bool:
 
 
 class IchimokuStrategy(Strategy, key='ichimoku'):
-    """MTF Ichimoku strategy: 4H→1H→15M→5M cascade.
+    """MTF Ichimoku strategy: 4H->1H->15M->5M cascade (default) or 15M->5M mode.
 
     Replicates the exact signal generation logic from SignalEngine.scan()
     and confluence scoring from ConfluenceScorer.score().
+
+    When ``config["timeframes"]`` is ``["15M", "5M"]`` the 4H and 1H gates
+    are dropped and the 15M cloud direction is used as the primary trend
+    filter, producing significantly more signals for prop-firm trading.
     """
 
     required_evaluators = [
@@ -77,65 +81,50 @@ class IchimokuStrategy(Strategy, key='ichimoku'):
         self.trading_mode = KijunExitMode()
         self.zone_manager = ZoneManager()
 
-        # Calculate warmup from kijun period and 4H resample factor
-        # 4H = 240 1M bars, kijun needs 26 bars: 26 * 240 = 6240
-        self.warmup_bars = self._cfg["kijun_period"] * 240
+        # Determine mode from configured timeframes
+        timeframes = self._cfg.get("timeframes", ["4H", "1H", "15M", "5M"])
+        self._15m_only = ("4H" not in timeframes and "1H" not in timeframes)
+
+        # Dynamic required_evaluators based on mode
+        if self._15m_only:
+            self.required_evaluators = [
+                EvalRequirement('ichimoku', ['15M', '5M']),
+                EvalRequirement('adx', ['15M']),
+                EvalRequirement('atr', ['15M']),
+                EvalRequirement('session', ['5M']),
+            ]
+            # 15M = 60 1M bars, kijun needs 26 bars: 26 * 60 = 1560
+            self.warmup_bars = self._cfg["kijun_period"] * 60
+        else:
+            self.required_evaluators = [
+                EvalRequirement('ichimoku', ['4H', '1H', '15M', '5M']),
+                EvalRequirement('adx', ['15M']),
+                EvalRequirement('atr', ['15M']),
+                EvalRequirement('session', ['5M']),
+            ]
+            # 4H = 240 1M bars, kijun needs 26 bars: 26 * 240 = 6240
+            self.warmup_bars = self._cfg["kijun_period"] * 240
 
     # ------------------------------------------------------------------
     # Strategy ABC: decide()
     # ------------------------------------------------------------------
 
     def decide(self, eval_matrix: EvalMatrix) -> Optional[Signal]:
-        """4H→1H→15M→5M cascade. Returns Signal or None.
+        """4H->1H->15M->5M cascade (default) or 15M->5M mode. Returns Signal or None.
 
         This replicates the exact logic from SignalEngine.scan().
+        In 15M-only mode, the 4H and 1H gates are skipped and the 15M cloud
+        direction is used as the primary trend filter.
         """
         reasoning: dict = {}
 
-        # --- Step 1: 4H cloud direction (hard filter) ---
-        ichi_4h = eval_matrix.get('ichimoku_4H')
-        if ichi_4h is None:
-            return None
-
-        cloud_dir_4h = ichi_4h.metadata.get('cloud_direction', 0)
-        if cloud_dir_4h == 1:
-            direction = "long"
-        elif cloud_dir_4h == -1:
-            direction = "short"
+        if self._15m_only:
+            direction, reasoning = self._decide_15m_trend(eval_matrix, reasoning)
         else:
-            return None  # Flat/neutral — no trade
+            direction, reasoning = self._decide_4h_cascade(eval_matrix, reasoning)
 
-        reasoning["4h_filter"] = {
-            "pass": True,
-            "direction": direction,
-            "reason": f"4H cloud is {'bullish' if direction == 'long' else 'bearish'}"
-        }
-
-        # --- Step 2: 1H TK confirmation ---
-        ichi_1h = eval_matrix.get('ichimoku_1H')
-        if ichi_1h is None:
+        if direction is None:
             return None
-
-        sign = 1 if direction == "long" else -1
-        tk_1h = ichi_1h.metadata.get('tk_cross', 0)
-        if tk_1h != sign:
-            return None  # 1H TK not confirming
-
-        reasoning["1h_confirmation"] = {"pass": True, "direction": direction}
-
-        # --- Step 3: 15M signal (TK cross + cloud position + chikou) ---
-        ichi_15m = eval_matrix.get('ichimoku_15M')
-        if ichi_15m is None:
-            return None
-
-        tk_15m = ichi_15m.metadata.get('tk_cross', 0)
-        cloud_pos_15m = ichi_15m.metadata.get('cloud_position', 0)
-        chikou_15m = ichi_15m.metadata.get('chikou_confirmed', 0)
-
-        if tk_15m != sign or cloud_pos_15m != sign or chikou_15m != sign:
-            return None  # 15M conditions not met
-
-        reasoning["15m_signal"] = {"pass": True}
 
         # --- Step 4: 5M entry timing (pullback to Kijun) ---
         ichi_5m = eval_matrix.get('ichimoku_5M')
@@ -228,6 +217,92 @@ class IchimokuStrategy(Strategy, key='ichimoku'):
         )
 
     # ------------------------------------------------------------------
+    # Private: 4H->1H->15M cascade (original mode)
+    # ------------------------------------------------------------------
+
+    def _decide_4h_cascade(
+        self, eval_matrix: EvalMatrix, reasoning: dict
+    ) -> tuple[Optional[str], dict]:
+        """Original 4H->1H->15M cascade filter. Returns (direction, reasoning)."""
+
+        # --- Step 1: 4H cloud direction (hard filter) ---
+        ichi_4h = eval_matrix.get('ichimoku_4H')
+        if ichi_4h is None:
+            return None, reasoning
+
+        cloud_dir_4h = ichi_4h.metadata.get('cloud_direction', 0)
+        if cloud_dir_4h == 1:
+            direction = "long"
+        elif cloud_dir_4h == -1:
+            direction = "short"
+        else:
+            return None, reasoning  # Flat/neutral -- no trade
+
+        reasoning["4h_filter"] = {
+            "pass": True,
+            "direction": direction,
+            "reason": f"4H cloud is {'bullish' if direction == 'long' else 'bearish'}",
+        }
+
+        # --- Step 2: 1H TK confirmation ---
+        ichi_1h = eval_matrix.get('ichimoku_1H')
+        if ichi_1h is None:
+            return None, reasoning
+
+        sign = 1 if direction == "long" else -1
+        tk_1h = ichi_1h.metadata.get('tk_cross', 0)
+        if tk_1h != sign:
+            return None, reasoning  # 1H TK not confirming
+
+        reasoning["1h_confirmation"] = {"pass": True, "direction": direction}
+
+        # --- Step 3: 15M signal (TK cross + cloud position + chikou) ---
+        ichi_15m = eval_matrix.get('ichimoku_15M')
+        if ichi_15m is None:
+            return None, reasoning
+
+        tk_15m = ichi_15m.metadata.get('tk_cross', 0)
+        cloud_pos_15m = ichi_15m.metadata.get('cloud_position', 0)
+        chikou_15m = ichi_15m.metadata.get('chikou_confirmed', 0)
+
+        if tk_15m != sign or cloud_pos_15m != sign or chikou_15m != sign:
+            return None, reasoning  # 15M conditions not met
+
+        reasoning["15m_signal"] = {"pass": True}
+
+        return direction, reasoning
+
+    # ------------------------------------------------------------------
+    # Private: 15M-only trend filter (no 4H/1H gates)
+    # ------------------------------------------------------------------
+
+    def _decide_15m_trend(
+        self, eval_matrix: EvalMatrix, reasoning: dict
+    ) -> tuple[Optional[str], dict]:
+        """15M cloud direction as sole trend filter. Returns (direction, reasoning)."""
+
+        ichi_15m = eval_matrix.get('ichimoku_15M')
+        if ichi_15m is None:
+            return None, reasoning
+
+        cloud_dir_15m = ichi_15m.metadata.get('cloud_direction', 0)
+        if cloud_dir_15m == 1:
+            direction = "long"
+        elif cloud_dir_15m == -1:
+            direction = "short"
+        else:
+            return None, reasoning  # Flat/neutral -- no trade
+
+        reasoning["15m_trend_filter"] = {
+            "pass": True,
+            "direction": direction,
+            "reason": f"15M cloud is {'bullish' if direction == 'long' else 'bearish'}",
+        }
+        reasoning["15m_signal"] = {"pass": True}
+
+        return direction, reasoning
+
+    # ------------------------------------------------------------------
     # Strategy ABC: score_confluence()
     # ------------------------------------------------------------------
 
@@ -240,31 +315,68 @@ class IchimokuStrategy(Strategy, key='ichimoku'):
     ) -> BaseConfluenceResult:
         """Replicate ConfluenceScorer.score() logic using EvalMatrix data.
 
-        0-9 scale:
-        Ichimoku (0-5): 4H cloud, 1H TK, 15M TK, 15M chikou, 5M near kijun
-        Bonuses (0-4): ADX trending, active session, zone nearby, divergence
+        Default mode (0-9 scale):
+          Ichimoku (0-5): 4H cloud, 1H TK, 15M TK, 15M chikou, 5M near kijun
+          Bonuses (0-4): ADX trending, active session, zone nearby, divergence
+
+        15M-only mode (0-7 scale):
+          Ichimoku (0-5): 15M cloud, 15M TK, 15M chikou, 5M cloud, 5M near kijun
+          Bonuses (0-2): ADX trending, active session
         """
         breakdown: dict = {}
         sign = 1 if direction == "long" else -1
 
-        # Ichimoku scoring (0-5)
-        ichi_4h = eval_matrix.get('ichimoku_4H')
-        cloud_4h_aligned = (ichi_4h.metadata.get('cloud_direction', 0) == sign) if ichi_4h else False
-        breakdown["4h_cloud_aligned"] = cloud_4h_aligned
-
-        ichi_1h = eval_matrix.get('ichimoku_1H')
-        tk_1h_aligned = (ichi_1h.metadata.get('tk_cross', 0) == sign) if ichi_1h else False
-        breakdown["1h_tk_aligned"] = tk_1h_aligned
-
         ichi_15m = eval_matrix.get('ichimoku_15M')
-        tk_15m_cross = (ichi_15m.metadata.get('tk_cross', 0) == sign) if ichi_15m else False
-        breakdown["15m_tk_cross"] = tk_15m_cross
-
-        chikou_15m = (ichi_15m.metadata.get('chikou_confirmed', 0) == sign) if ichi_15m else False
-        breakdown["15m_chikou_confirmed"] = chikou_15m
-
-        # 5M near kijun
         ichi_5m = eval_matrix.get('ichimoku_5M')
+
+        if self._15m_only:
+            # 15M-only scoring (0-5): 15M cloud + 15M TK + 15M chikou
+            #                         + 5M cloud + 5M near kijun
+            cloud_15m_aligned = (
+                ichi_15m.metadata.get('cloud_direction', 0) == sign
+            ) if ichi_15m else False
+            breakdown["15m_cloud_aligned"] = cloud_15m_aligned
+
+            tk_15m_cross = (
+                ichi_15m.metadata.get('tk_cross', 0) == sign
+            ) if ichi_15m else False
+            breakdown["15m_tk_cross"] = tk_15m_cross
+
+            chikou_15m = (
+                ichi_15m.metadata.get('chikou_confirmed', 0) == sign
+            ) if ichi_15m else False
+            breakdown["15m_chikou_confirmed"] = chikou_15m
+
+            cloud_5m_aligned = (
+                ichi_5m.metadata.get('cloud_direction', 0) == sign
+            ) if ichi_5m else False
+            breakdown["5m_cloud_aligned"] = cloud_5m_aligned
+
+        else:
+            # Original scoring: 4H cloud + 1H TK + 15M TK + 15M chikou
+            ichi_4h = eval_matrix.get('ichimoku_4H')
+            cloud_4h_aligned = (
+                ichi_4h.metadata.get('cloud_direction', 0) == sign
+            ) if ichi_4h else False
+            breakdown["4h_cloud_aligned"] = cloud_4h_aligned
+
+            ichi_1h = eval_matrix.get('ichimoku_1H')
+            tk_1h_aligned = (
+                ichi_1h.metadata.get('tk_cross', 0) == sign
+            ) if ichi_1h else False
+            breakdown["1h_tk_aligned"] = tk_1h_aligned
+
+            tk_15m_cross = (
+                ichi_15m.metadata.get('tk_cross', 0) == sign
+            ) if ichi_15m else False
+            breakdown["15m_tk_cross"] = tk_15m_cross
+
+            chikou_15m = (
+                ichi_15m.metadata.get('chikou_confirmed', 0) == sign
+            ) if ichi_15m else False
+            breakdown["15m_chikou_confirmed"] = chikou_15m
+
+        # 5M near kijun (shared by both modes)
         close_5m = ichi_5m.metadata.get('close', 0.0) if ichi_5m else 0.0
         kijun_5m = ichi_5m.metadata.get('kijun', float('nan')) if ichi_5m else float('nan')
 
@@ -276,13 +388,22 @@ class IchimokuStrategy(Strategy, key='ichimoku'):
             near_kijun = abs(close_5m - kijun_5m) <= self._cfg["kijun_proximity_atr"] * atr_val
         breakdown["5m_near_kijun"] = near_kijun
 
-        ichimoku_score = sum([
-            cloud_4h_aligned,
-            tk_1h_aligned,
-            tk_15m_cross,
-            chikou_15m,
-            near_kijun,
-        ])
+        if self._15m_only:
+            ichimoku_score = sum([
+                cloud_15m_aligned,
+                tk_15m_cross,
+                chikou_15m,
+                cloud_5m_aligned,
+                near_kijun,
+            ])
+        else:
+            ichimoku_score = sum([
+                cloud_4h_aligned,
+                tk_1h_aligned,
+                tk_15m_cross,
+                chikou_15m,
+                near_kijun,
+            ])
 
         # Bonuses (0-4)
         adx_result = eval_matrix.get('adx_15M')

@@ -11,35 +11,83 @@ strategies:
 
     adx:
       period: 14
-      threshold: 28  # Higher than standard (25) to filter weaker trends on gold
+      threshold: 20  # Standard trending threshold — 28 was filtering out too many valid gold trends
 
     atr:
       period: 14
-      stop_multiplier: 1.5  # Initial stop = 1.5 × ATR beyond entry
+      stop_multiplier: 2.5  # Initial stop = 2.5 × ATR beyond entry (widened: 1.5x too tight for gold volatility)
 
     signal:
-      min_confluence_score: 4
+      min_confluence_score: 2
       tier_a_plus: 7   # All major factors aligned — full risk allocation
       tier_b: 5        # Strong signal — 75% risk allocation
-      tier_c: 4        # Minimum viable signal — 50% risk allocation
+      tier_c: 2        # Minimum viable signal — 50% risk allocation
       timeframes:
-        - "4H"
-        - "1H"
         - "15M"
         - "5M"
+
+  asian_breakout:
+    enabled: true
+    weight: 1.0
+    asian_session_start_utc: "21:00"
+    asian_session_end_utc: "06:00"
+    london_entry_start_utc: "06:00"
+    london_entry_end_utc: "10:00"
+    min_range_pips: 20
+    max_range_pips: 80
+    rr_ratio: 2.0
+    atr_period: 14
+
+  ema_pullback:
+    enabled: true
+    weight: 1.0
+    fast_ema: 14
+    mid_ema: 18
+    slow_ema: 24
+    atr_period: 14
+    min_ema_angle_deg: 30
+    max_ema_angle_deg: 95
+    pullback_candles_min: 1
+    pullback_candles_max: 3
+    breakout_window_bars: 20
+    rr_ratio: 2.0
 
 # Shared config (not strategy-specific)
 risk:
   initial_risk_pct: 1.5    # % of account risked per trade in Phase 1 (0–+4%)
   reduced_risk_pct: 0.75   # % of account risked per trade in Phase 2 (>+4%)
   phase_threshold_pct: 4.0 # Account growth level that triggers phase switch
-  daily_circuit_breaker_pct: 2.0  # Halt trading after 2% daily drawdown
+  daily_circuit_breaker_pct: 4.5  # Halt trading after 4.5% daily drawdown
   max_concurrent_positions: 1     # Gold — one position at a time
 
 exit:
   strategy: hybrid_50_50          # Close 50% at TP; trail the remainder
-  tp_r_multiple: 2.0              # Initial TP at 2 R
+  tp_r_multiple: 1.5              # Initial TP at 1.5 R (lowered: more achievable with wider stop)
   trail_type: kijun               # Trailing mechanism: kijun | fixed | atr
   breakeven_threshold_r: 1.0      # Move SL to BE once price reaches 1 R
   kijun_trail_start_r: 1.5        # Begin Kijun trail from 1.5 R
   higher_tf_kijun_start_r: 3.0   # Switch to higher-TF Kijun trail from 3 R
+
+prop_firm:
+  name: the5ers_2step_high_stakes
+  account_size: 10000
+  leverage: 100
+  phase_1:
+    profit_target_pct: 8.0
+    max_loss_pct: 10.0
+    daily_loss_pct: 5.0
+    time_limit_days: 0
+  phase_2:
+    profit_target_pct: 5.0
+    max_loss_pct: 10.0
+    daily_loss_pct: 5.0
+    time_limit_days: 0
+  funded:
+    monthly_target_pct: 10.0
+    max_loss_pct: 10.0
+    daily_loss_pct: 5.0
+
+active_strategies:
+  - ichimoku
+  - asian_breakout
+  - ema_pullback

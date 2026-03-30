@@ -109,27 +109,27 @@ class TestEdgeToggles:
     def test_time_of_day_defaults(self) -> None:
         e = self._cfg.edges.time_of_day
         assert e.enabled is True
-        assert e.params["start_utc"] == "08:00"
-        assert e.params["end_utc"] == "17:00"
+        assert e.params["start_utc"] == "06:00"
+        assert e.params["end_utc"] == "21:00"
 
     def test_day_of_week_defaults(self) -> None:
         e = self._cfg.edges.day_of_week
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["allowed_days"] == [1, 2, 3]  # Tue/Wed/Thu
 
     def test_london_open_delay_defaults(self) -> None:
         e = self._cfg.edges.london_open_delay
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["delay_minutes"] == 30
 
     def test_spread_filter_defaults(self) -> None:
         e = self._cfg.edges.spread_filter
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["max_spread_points"] == 30
 
     def test_news_filter_defaults(self) -> None:
         e = self._cfg.edges.news_filter
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["block_minutes_before"] == 30
         assert e.params["block_minutes_after"] == 30
         assert "red" in e.params["impact_levels"]
@@ -141,28 +141,28 @@ class TestEdgeToggles:
 
     def test_regime_filter_defaults(self) -> None:
         e = self._cfg.edges.regime_filter
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["adx_min"] == 28
 
     def test_time_stop_defaults(self) -> None:
         e = self._cfg.edges.time_stop
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["candle_limit"] == 12
 
     def test_bb_squeeze_defaults(self) -> None:
         e = self._cfg.edges.bb_squeeze
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["bb_period"] == 20
 
     def test_confluence_scoring_defaults(self) -> None:
         e = self._cfg.edges.confluence_scoring
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["min_score"] == 4
         assert e.params["tier_a_plus_threshold"] == 7
 
     def test_equity_curve_defaults(self) -> None:
         e = self._cfg.edges.equity_curve
-        assert e.enabled is True
+        assert e.enabled is False
         assert e.params["lookback_trades"] == 20
 
     def test_toggle_edge_off_via_yaml(self, tmp_config_dir: Path) -> None:
@@ -192,34 +192,32 @@ class TestStrategyConfig:
         assert ich.senkou_b_period == 52
 
     def test_adx_threshold(self) -> None:
-        assert self._cfg.strategy.adx.threshold == 28
+        assert self._cfg.strategy.adx.threshold == 20
 
     def test_risk_params(self) -> None:
         risk = self._cfg.strategy.risk
         assert risk.initial_risk_pct == pytest.approx(1.5)
         assert risk.reduced_risk_pct == pytest.approx(0.75)
         assert risk.phase_threshold_pct == pytest.approx(4.0)
-        assert risk.daily_circuit_breaker_pct == pytest.approx(2.0)
+        assert risk.daily_circuit_breaker_pct == pytest.approx(4.5)
         assert risk.max_concurrent_positions == 1
 
     def test_exit_params(self) -> None:
         ex = self._cfg.strategy.exit
         assert ex.strategy == "hybrid_50_50"
-        assert ex.tp_r_multiple == pytest.approx(2.0)
+        assert ex.tp_r_multiple == pytest.approx(1.5)
         assert ex.trail_type == "kijun"
         assert ex.breakeven_threshold_r == pytest.approx(1.0)
 
     def test_signal_tiers(self) -> None:
         sig = self._cfg.strategy.signal
-        assert sig.min_confluence_score == 4
+        assert sig.min_confluence_score == 2
         assert sig.tier_a_plus == 7
         assert sig.tier_b == 5
-        assert sig.tier_c == 4
+        assert sig.tier_c == 2
 
     def test_signal_timeframes(self) -> None:
         tf = self._cfg.strategy.signal.timeframes
-        assert "4H" in tf
-        assert "1H" in tf
         assert "15M" in tf
         assert "5M" in tf
 
