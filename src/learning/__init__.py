@@ -11,6 +11,7 @@ stats_analyzer   — Statistical win-rate breakdowns by session, regime, conflue
 edge_reviewer    — Per-edge performance review and advisory suggestions.
 adaptive_engine  — Self-learning engine (mechanical → statistical → similarity).
 report_generator — Weekly performance report builder (text and HTML).
+claude_md_writer — Append/read strategy learnings in CLAUDE.md for session memory.
 """
 
 from .feature_vector import FeatureVectorBuilder
@@ -21,6 +22,7 @@ from .stats_analyzer import StatsAnalyzer
 from .edge_reviewer import EdgeReviewer, EdgeReviewResult, EdgeSuggestion
 from .adaptive_engine import AdaptiveLearningEngine, PreTradeInsight
 from .report_generator import ReportGenerator, WeeklyReport
+from .claude_md_writer import ClaudeMdWriter
 
 __all__ = [
     "FeatureVectorBuilder",
@@ -38,4 +40,5 @@ __all__ = [
     "PreTradeInsight",
     "ReportGenerator",
     "WeeklyReport",
+    "ClaudeMdWriter",
 ]
