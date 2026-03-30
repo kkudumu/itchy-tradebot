@@ -231,12 +231,75 @@ class SignalConfig(BaseModel):
 
 
 class StrategyConfig(BaseModel):
-    ichimoku: IchimokuConfig = Field(default_factory=IchimokuConfig)
-    adx: ADXConfig = Field(default_factory=ADXConfig)
-    atr: ATRConfig = Field(default_factory=ATRConfig)
+    active_strategy: str = "ichimoku"
+    strategies: dict[str, dict] = Field(default_factory=lambda: {
+        "ichimoku": {
+            "ichimoku": {"tenkan_period": 9, "kijun_period": 26, "senkou_b_period": 52},
+            "adx": {"period": 14, "threshold": 28},
+            "atr": {"period": 14, "stop_multiplier": 1.5},
+            "signal": {
+                "min_confluence_score": 4,
+                "tier_a_plus": 7,
+                "tier_b": 5,
+                "tier_c": 4,
+                "timeframes": ["4H", "1H", "15M", "5M"],
+            },
+        }
+    })
     risk: RiskConfig = Field(default_factory=RiskConfig)
     exit: ExitConfig = Field(default_factory=ExitConfig)
-    signal: SignalConfig = Field(default_factory=SignalConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_flat_format(cls, values: Any) -> Any:
+        """Accept old flat format (ichimoku/adx/atr/signal at top level) for
+        backward compatibility with tests and legacy YAML files.
+
+        If the incoming data does not have an ``active_strategy`` or
+        ``strategies`` key but does have flat strategy keys, migrate them into
+        the nested structure automatically.
+        """
+        if not isinstance(values, dict):
+            return values
+
+        # Already new-format — nothing to do
+        if "active_strategy" in values or "strategies" in values:
+            return values
+
+        flat_keys = {"ichimoku", "adx", "atr", "signal"}
+        found_flat = {k: values.pop(k) for k in flat_keys if k in values}
+        if found_flat:
+            values.setdefault("active_strategy", "ichimoku")
+            values.setdefault("strategies", {})
+            values["strategies"].setdefault("ichimoku", {})
+            values["strategies"]["ichimoku"].update(found_flat)
+
+        return values
+
+    # ------------------------------------------------------------------
+    # Backward-compatible property accessors
+    # ------------------------------------------------------------------
+
+    @property
+    def ichimoku(self) -> "IchimokuConfig":
+        """Backward-compatible access to Ichimoku config."""
+        data = self.strategies.get("ichimoku", {}).get("ichimoku", {})
+        return IchimokuConfig(**data) if data else IchimokuConfig()
+
+    @property
+    def adx(self) -> "ADXConfig":
+        data = self.strategies.get("ichimoku", {}).get("adx", {})
+        return ADXConfig(**data) if data else ADXConfig()
+
+    @property
+    def atr(self) -> "ATRConfig":
+        data = self.strategies.get("ichimoku", {}).get("atr", {})
+        return ATRConfig(**data) if data else ATRConfig()
+
+    @property
+    def signal(self) -> "SignalConfig":
+        data = self.strategies.get("ichimoku", {}).get("signal", {})
+        return SignalConfig(**data) if data else SignalConfig()
 
 
 # ---------------------------------------------------------------------------
