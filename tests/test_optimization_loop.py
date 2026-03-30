@@ -7,7 +7,7 @@ Tests use tmp_path for config/report file isolation.
 Test categories
 ---------------
 1.  OptimizationLoop.__init__ — config parsing and component setup
-2.  _build_claude_prompt — sections, constraints, target Sharpe
+2.  _build_claude_prompt — sections, constraints, target pass rate
 3.  _spawn_claude — subprocess invocation and error handling
 4.  _detect_changes — git diff on config files
 5.  _check_plateau — plateau detection logic
@@ -39,10 +39,29 @@ import yaml
 # ---------------------------------------------------------------------------
 
 
+class _FakeChallengeSimulation:
+    """Minimal stand-in for ChallengeSimulationResult."""
+
+    def __init__(self, pass_rate: float = 0.0) -> None:
+        self.pass_rate: float = pass_rate
+        self.rolling_pass_rate: float = pass_rate
+        self.monte_carlo_pass_rate: float = pass_rate
+        self.total_windows: int = 36
+        self.phase_1_pass_count: int = int(pass_rate * 36)
+        self.phase_2_pass_count: int = int(pass_rate * 36)
+        self.full_pass_count: int = int(pass_rate * 36)
+        self.avg_days_phase_1: float = 30.0
+        self.avg_days_phase_2: float = 25.0
+        self.failure_breakdown: Dict[str, int] = {"daily_dd": 5, "total_dd": 3}
+        self.funded_monthly_returns: List[float] = [0.05]
+        self.avg_funded_monthly_return: float = 0.05
+        self.months_above_10pct: int = 0
+
+
 class _FakeResult:
     """Minimal stand-in for BacktestResult."""
 
-    def __init__(self, sharpe: float = 0.8, win_rate: float = 0.55) -> None:
+    def __init__(self, sharpe: float = 0.8, win_rate: float = 0.55, pass_rate: float = 0.0) -> None:
         self.metrics: Dict[str, Any] = {
             "sharpe": sharpe,
             "win_rate": win_rate,
@@ -71,17 +90,18 @@ class _FakeResult:
         self.daily_pnl = pd.Series([100.0])
         self.skipped_signals: int = 0
         self.total_signals: int = 5
+        self.challenge_simulation = _FakeChallengeSimulation(pass_rate=pass_rate)
 
 
 def _make_loop_config(
     max_iterations: int = 3,
-    target_sharpe: float = 2.0,
+    target_pass_rate: float = 0.80,
     reports_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {
         "optimization": {
             "max_iterations": max_iterations,
-            "target_sharpe": target_sharpe,
+            "target_pass_rate": target_pass_rate,
             "max_changes_per_iteration": 2,
             "optimization_years": 2,
             "plateau_threshold": 0.05,
@@ -121,13 +141,16 @@ def _make_df(rows: int = 200) -> pd.DataFrame:
 
 def _make_strategy_yaml(tmp_path: Path) -> Path:
     content = textwrap.dedent("""\
-        ichimoku:
-          tenkan_period: 9
-          kijun_period: 26
-          senkou_b_period: 52
-        adx:
-          period: 14
-          threshold: 28
+        active_strategy: ichimoku
+        strategies:
+          ichimoku:
+            ichimoku:
+              tenkan_period: 9
+              kijun_period: 26
+              senkou_b_period: 52
+            adx:
+              period: 14
+              threshold: 28
         risk:
           initial_risk_pct: 1.5
     """)
@@ -224,7 +247,7 @@ def basic_loop(loop_mod, tmp_configs):
 
 class TestOptimizationLoopInit:
     def test_config_values_parsed(self, loop_mod, tmp_configs):
-        cfg = _make_loop_config(max_iterations=7, target_sharpe=1.5)
+        cfg = _make_loop_config(max_iterations=7, target_pass_rate=0.60)
         cfg["optimization"]["plateau_threshold"] = 0.03
         loop = loop_mod.OptimizationLoop(
             config=cfg,
@@ -232,7 +255,7 @@ class TestOptimizationLoopInit:
             reports_dir=str(tmp_configs / "reports"),
         )
         assert loop._max_iterations == 7
-        assert loop._target_sharpe == 1.5
+        assert loop._target_pass_rate == pytest.approx(0.60)
         assert loop._plateau_threshold == pytest.approx(0.03)
 
     def test_no_db_pool_graceful(self, loop_mod, tmp_configs):
@@ -295,22 +318,27 @@ class TestBuildClaudePrompt:
         prompt = basic_loop._build_claude_prompt(report, None, [], "No learnings.")
         assert "AT MOST 2" in prompt
 
-    def test_prompt_contains_target_sharpe(self, basic_loop):
+    def test_prompt_contains_target_pass_rate(self, basic_loop):
         report = self._make_report()
         prompt = basic_loop._build_claude_prompt(report, None, [], "No learnings.")
-        # target_sharpe is 2.0 in basic_loop fixture
-        assert "2.0" in prompt or "2.00" in prompt
+        # target_pass_rate is 0.80 in basic_loop fixture -> shown as "80%"
+        assert "80%" in prompt
 
-    def test_prompt_contains_previous_comparison(self, basic_loop):
+    def test_prompt_contains_challenge_sim_section(self, basic_loop):
         report = self._make_report(sharpe=0.9)
-        prev_report = self._make_report(sharpe=0.7)
-        report["comparison"] = {
-            "has_previous": True,
-            "sharpe": {"current": 0.9, "previous": 0.7, "delta": 0.2},
+        report["challenge_simulation"] = {
+            "pass_rate": 0.35,
+            "phase_1_pass_count": 13,
+            "full_pass_count": 10,
+            "total_windows": 36,
+            "avg_days_phase_1": 30,
+            "avg_days_phase_2": 25,
+            "failure_breakdown": {"daily_dd": 5, "total_dd": 3},
         }
-        prompt = basic_loop._build_claude_prompt(report, prev_report, [], "")
-        assert "Previous Run Comparison" in prompt
-        assert "0.7" in prompt
+        prompt = basic_loop._build_claude_prompt(report, None, [], "")
+        assert "Challenge Simulation Results" in prompt
+        assert "35.0%" in prompt
+        assert "BIGGEST FAILURE MODE: daily_dd" in prompt
 
     def test_prompt_contains_similar_configs(self, basic_loop):
         sc = MagicMock()
@@ -430,45 +458,45 @@ class TestDetectChanges:
 
 
 class TestCheckPlateau:
-    def _entry(self, sharpe: float, iteration: int = 1) -> Dict[str, Any]:
-        return {"iteration": iteration, "run_id": f"r{iteration}", "sharpe": sharpe}
+    def _entry(self, pass_rate: float, iteration: int = 1) -> Dict[str, Any]:
+        return {"iteration": iteration, "run_id": f"r{iteration}", "pass_rate": pass_rate}
 
     def test_no_plateau_with_short_history(self, basic_loop):
-        history = [self._entry(0.5), self._entry(0.6)]
+        history = [self._entry(0.30), self._entry(0.40)]
         assert basic_loop._check_plateau(history) is False
 
     def test_no_plateau_when_improving(self, basic_loop):
         # Each step > 5% improvement
         history = [
-            self._entry(0.50),
-            self._entry(0.60),  # +20%
-            self._entry(0.72),  # +20%
+            self._entry(0.30),
+            self._entry(0.36),  # +20%
+            self._entry(0.43),  # +19%
         ]
         assert basic_loop._check_plateau(history) is False
 
     def test_plateau_detected_stale_metrics(self, basic_loop):
         # Each step < 5% improvement for 3 consecutive iterations
         history = [
-            self._entry(1.000),
-            self._entry(1.010),  # +1% — stale
-            self._entry(1.020),  # +1% — stale
-            self._entry(1.030),  # +1% — stale
+            self._entry(0.400),
+            self._entry(0.404),  # +1% -- stale
+            self._entry(0.408),  # +1% -- stale
+            self._entry(0.412),  # +1% -- stale
         ]
         # plateau_iterations=3 so we look at last 3 entries
         assert basic_loop._check_plateau(history) is True
 
     def test_plateau_false_when_one_good_step(self, basic_loop):
         history = [
-            self._entry(1.000),
-            self._entry(1.010),  # stale
-            self._entry(1.200),  # +18.8% — breaks plateau
-            self._entry(1.210),  # stale
+            self._entry(0.400),
+            self._entry(0.404),  # stale
+            self._entry(0.500),  # +23.8% -- breaks plateau
+            self._entry(0.504),  # stale
         ]
-        # Last 3: 1.010 → 1.200 (+18.8%) → 1.210 (+0.8%)
+        # Last 3: 0.404 -> 0.500 (+23.8%) -> 0.504 (+0.8%)
         # The big jump in the middle means no plateau
         assert basic_loop._check_plateau(history) is False
 
-    def test_plateau_zero_previous_sharpe_returns_false(self, basic_loop):
+    def test_plateau_zero_previous_pass_rate_returns_false(self, basic_loop):
         history = [
             self._entry(0.0),
             self._entry(0.0),
@@ -551,17 +579,17 @@ class TestSliceData:
 
 
 class TestRunLoop:
-    def _mock_backtester_factory(self, sharpe: float = 0.8):
+    def _mock_backtester_factory(self, sharpe: float = 0.8, pass_rate: float = 0.0):
         """Return a patch target and a mock class."""
         mock_instance = MagicMock()
-        mock_instance.run.return_value = _FakeResult(sharpe=sharpe)
+        mock_instance.run.return_value = _FakeResult(sharpe=sharpe, pass_rate=pass_rate)
         mock_class = MagicMock(return_value=mock_instance)
         return mock_class
 
-    def test_run_stops_at_target_sharpe(self, loop_mod, tmp_configs):
-        """Loop stops when Sharpe > target_sharpe in first iteration."""
+    def test_run_stops_at_target_pass_rate(self, loop_mod, tmp_configs):
+        """Loop stops when pass_rate >= target_pass_rate in first iteration."""
         cfg = _make_loop_config(
-            max_iterations=5, target_sharpe=0.5,
+            max_iterations=5, target_pass_rate=0.50,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -571,7 +599,7 @@ class TestRunLoop:
             reports_dir=str(tmp_configs / "reports"),
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
-        mock_cls = self._mock_backtester_factory(sharpe=0.8)
+        mock_cls = self._mock_backtester_factory(sharpe=0.8, pass_rate=0.60)
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             summary = loop.run()
         assert summary["stop_reason"] == "target_reached"
@@ -579,7 +607,7 @@ class TestRunLoop:
 
     def test_run_stops_at_max_iterations(self, loop_mod, tmp_configs):
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -589,7 +617,7 @@ class TestRunLoop:
             reports_dir=str(tmp_configs / "reports"),
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
-        mock_cls = self._mock_backtester_factory(sharpe=0.4)
+        mock_cls = self._mock_backtester_factory(sharpe=0.4, pass_rate=0.10)
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             with patch("subprocess.run") as mock_sub:
                 mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -600,7 +628,7 @@ class TestRunLoop:
     def test_run_stops_at_plateau(self, loop_mod, tmp_configs):
         """Loop stops when plateau detected (3 stale iterations)."""
         cfg = _make_loop_config(
-            max_iterations=10, target_sharpe=5.0,
+            max_iterations=10, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["optimization"]["plateau_iterations"] = 3
@@ -614,14 +642,14 @@ class TestRunLoop:
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
 
-        # Sharpe barely improves each time → plateau after 4 calls (3 improvements)
+        # Pass rate barely improves each time -> plateau after 4 calls (3 improvements)
         call_count = [0]
-        sharpe_values = [1.000, 1.005, 1.010, 1.015, 1.020, 1.025]
+        pass_rate_values = [0.300, 0.302, 0.304, 0.306, 0.308, 0.310]
 
         def _fake_run(df):
-            idx = min(call_count[0], len(sharpe_values) - 1)
+            idx = min(call_count[0], len(pass_rate_values) - 1)
             call_count[0] += 1
-            return _FakeResult(sharpe=sharpe_values[idx])
+            return _FakeResult(sharpe=1.0, pass_rate=pass_rate_values[idx])
 
         mock_cls = MagicMock()
         mock_cls.return_value.run.side_effect = _fake_run
@@ -634,7 +662,7 @@ class TestRunLoop:
 
     def test_run_returns_iteration_history(self, loop_mod, tmp_configs):
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -644,12 +672,13 @@ class TestRunLoop:
             reports_dir=str(tmp_configs / "reports"),
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
-        mock_cls = self._mock_backtester_factory(sharpe=0.4)
+        mock_cls = self._mock_backtester_factory(sharpe=0.4, pass_rate=0.10)
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             with patch("subprocess.run") as mock_sub:
                 mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 summary = loop.run()
         assert len(summary["iteration_history"]) == 2
+        assert all("pass_rate" in entry for entry in summary["iteration_history"])
         assert all("sharpe" in entry for entry in summary["iteration_history"])
 
     def test_run_missing_data_file_raises(self, loop_mod, tmp_configs):
@@ -669,15 +698,15 @@ class TestRunLoop:
 
 
 class TestRevertOnWorsening:
-    def test_revert_called_when_sharpe_drops(self, loop_mod, tmp_configs):
-        """If re-run sharpe < initial sharpe, _revert_changes must be called.
+    def test_revert_called_when_pass_rate_drops(self, loop_mod, tmp_configs):
+        """If re-run pass_rate < initial pass_rate, _revert_changes must be called.
 
         Requires max_iterations >= 2 so that iteration 1 reaches the Claude
         spawn path (the guard ``if iteration == max_iterations: break`` skips
         Claude on the very last iteration to avoid wasted API calls).
         """
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -689,7 +718,11 @@ class TestRevertOnWorsening:
         )
 
         # Calls: iter-1 backtest → iter-1 re-run (after Claude, worse) → iter-2 backtest
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=0.5), _FakeResult(sharpe=0.5)]
+        run_values = [
+            _FakeResult(sharpe=0.8, pass_rate=0.40),
+            _FakeResult(sharpe=0.5, pass_rate=0.20),
+            _FakeResult(sharpe=0.5, pass_rate=0.20),
+        ]
         run_idx = [0]
 
         def _alternating_run(df):
@@ -709,13 +742,13 @@ class TestRevertOnWorsening:
                         loop.run()
         mock_revert.assert_called_once()
 
-    def test_no_revert_when_sharpe_improves(self, loop_mod, tmp_configs):
-        """No revert when the re-run sharpe is equal or better.
+    def test_no_revert_when_pass_rate_improves(self, loop_mod, tmp_configs):
+        """No revert when the re-run pass_rate is equal or better.
 
         Uses max_iterations=2 for the same reason as the revert test above.
         """
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -727,7 +760,11 @@ class TestRevertOnWorsening:
         )
 
         # iter-1 backtest → iter-1 re-run (better) → iter-2 backtest
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.2), _FakeResult(sharpe=1.2)]
+        run_values = [
+            _FakeResult(sharpe=0.8, pass_rate=0.30),
+            _FakeResult(sharpe=1.2, pass_rate=0.45),
+            _FakeResult(sharpe=1.2, pass_rate=0.45),
+        ]
         run_idx = [0]
 
         def _alternating_run(df):
@@ -759,7 +796,7 @@ class TestLearningAppended:
         Uses max_iterations=2 so iteration 1 reaches the Claude spawn path.
         """
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -771,7 +808,11 @@ class TestLearningAppended:
         )
 
         # iter-1 backtest → iter-1 re-run (improved) → iter-2 backtest
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.0), _FakeResult(sharpe=1.0)]
+        run_values = [
+            _FakeResult(sharpe=0.8, pass_rate=0.30),
+            _FakeResult(sharpe=1.0, pass_rate=0.40),
+            _FakeResult(sharpe=1.0, pass_rate=0.40),
+        ]
         run_idx = [0]
 
         def _run(df):
@@ -800,7 +841,7 @@ class TestLearningAppended:
         which then detects an empty diff and records '(no changes)'.
         """
         cfg = _make_loop_config(
-            max_iterations=2, target_sharpe=5.0,
+            max_iterations=2, target_pass_rate=0.99,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -833,7 +874,7 @@ class TestLearningAppended:
 class TestFinalValidation:
     def test_final_validation_runs_on_full_dataset(self, loop_mod, tmp_configs):
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=0.5,
+            max_iterations=1, target_pass_rate=0.30,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = True
@@ -844,8 +885,8 @@ class TestFinalValidation:
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
 
-        # First call returns sharpe=0.8 (triggers target_reached), second is validation
-        results = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=0.75)]
+        # First call returns pass_rate=0.40 (triggers target_reached), second is validation
+        results = [_FakeResult(sharpe=0.8, pass_rate=0.40), _FakeResult(sharpe=0.75, pass_rate=0.35)]
         call_idx = [0]
 
         def _run(df):
@@ -864,7 +905,7 @@ class TestFinalValidation:
 
     def test_no_final_validation_when_disabled(self, loop_mod, tmp_configs):
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=0.5,
+            max_iterations=1, target_pass_rate=0.30,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -876,7 +917,7 @@ class TestFinalValidation:
         )
 
         mock_cls = MagicMock()
-        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8)
+        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8, pass_rate=0.40)
 
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             summary = loop.run()
@@ -893,7 +934,7 @@ class TestGracefulDegradationNoDB:
     def test_run_succeeds_without_db_pool(self, loop_mod, tmp_configs):
         """The loop must complete successfully even when db_pool=None."""
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=0.5,
+            max_iterations=1, target_pass_rate=0.30,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["persistence"]["enabled"] = True  # enabled but no pool
@@ -907,7 +948,7 @@ class TestGracefulDegradationNoDB:
         )
 
         mock_cls = MagicMock()
-        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8)
+        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8, pass_rate=0.40)
 
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             summary = loop.run()
@@ -917,7 +958,7 @@ class TestGracefulDegradationNoDB:
     def test_persist_called_with_trades_when_enabled(self, loop_mod, tmp_configs):
         """TradePersistence.persist_run is called with the trade list."""
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=0.5,
+            max_iterations=1, target_pass_rate=0.30,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["persistence"]["enabled"] = True
@@ -931,7 +972,7 @@ class TestGracefulDegradationNoDB:
         )
 
         mock_cls = MagicMock()
-        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8)
+        mock_cls.return_value.run.return_value = _FakeResult(sharpe=0.8, pass_rate=0.40)
 
         with patch.object(loop_mod, "_BacktesterClass", mock_cls):
             with patch.object(loop._trade_persistence, "persist_run") as mock_persist:

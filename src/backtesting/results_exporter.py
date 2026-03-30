@@ -110,6 +110,13 @@ class ResultsExporter:
         previous_metrics = self._get_latest_metrics(previous_runs)
         comparison = self._compute_comparison(metrics, previous_metrics)
 
+        # Extract challenge simulation data if present
+        challenge_sim = None
+        if hasattr(result, "challenge_simulation"):
+            challenge_sim = result.challenge_simulation
+        elif isinstance(result, dict):
+            challenge_sim = result.get("challenge_simulation")
+
         report: Dict[str, Any] = {
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -120,6 +127,21 @@ class ResultsExporter:
             "config_snapshot": config,
             "comparison": comparison,
         }
+
+        if challenge_sim:
+            report["challenge_simulation"] = {
+                "pass_rate": challenge_sim.pass_rate,
+                "rolling_pass_rate": challenge_sim.rolling_pass_rate,
+                "monte_carlo_pass_rate": challenge_sim.monte_carlo_pass_rate,
+                "total_windows": challenge_sim.total_windows,
+                "full_pass_count": challenge_sim.full_pass_count,
+                "phase_1_pass_count": challenge_sim.phase_1_pass_count,
+                "avg_days_phase_1": challenge_sim.avg_days_phase_1,
+                "avg_days_phase_2": challenge_sim.avg_days_phase_2,
+                "failure_breakdown": challenge_sim.failure_breakdown,
+                "funded_avg_monthly_return": challenge_sim.avg_funded_monthly_return,
+                "months_above_10pct": challenge_sim.months_above_10pct,
+            }
 
         path = self._reports_dir / f"{run_id}.json"
         serialised = json.dumps(report, indent=2, default=str)
