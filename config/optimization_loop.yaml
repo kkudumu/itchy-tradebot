@@ -12,7 +12,7 @@ persistence:
 
 claude:
   command: ["claude", "-p", "--dangerously-skip-permissions"]
-  timeout_seconds: 300
+  timeout_seconds: 600
   encoding: utf-8
 
 validation:

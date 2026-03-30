@@ -578,10 +578,16 @@ class OptimizationLoop:
             "",
             "STRICT CONSTRAINTS:",
             f"1. Make AT MOST {self._max_changes} parameter changes total across both config files.",
-            "2. Edit ONLY the following files:",
-            "   - config/strategy.yaml",
-            "   - config/edges.yaml",
-            "3. Do NOT change Python source files.",
+            "2. You may edit ANY of these files:",
+            "   - config/strategy.yaml — strategy parameters",
+            "   - config/edges.yaml — edge filter toggles and params",
+            "   - src/strategy/strategies/asian_breakout.py — Asian Range Breakout logic",
+            "   - src/strategy/strategies/ema_pullback.py — EMA Pullback State Machine logic",
+            "   - src/strategy/strategies/ichimoku.py — Ichimoku 15M strategy logic",
+            "   - src/risk/exit_manager.py — exit/trailing stop logic",
+            "   - src/strategy/signal_blender.py — signal selection logic",
+            "3. If you see a code bug causing losses (e.g., wrong SL/TP logic, bad entry timing),",
+            "   FIX THE CODE. Don't just tweak parameters around a broken algorithm.",
             "4. Each change must be justified by the data above.",
             "5. Focus on the biggest failure mode above.",
             "",
@@ -634,13 +640,18 @@ class OptimizationLoop:
             return ""
 
     def _detect_changes(self) -> str:
-        """Return git diff output for the two config files.
+        """Return git diff output for config and strategy source files.
 
         Returns an empty string if git is unavailable or there are no changes.
         """
         config_files = [
             str(_STRATEGY_CONFIG_PATH.relative_to(_REPO_ROOT)),
             str(_EDGES_CONFIG_PATH.relative_to(_REPO_ROOT)),
+            "src/strategy/strategies/asian_breakout.py",
+            "src/strategy/strategies/ema_pullback.py",
+            "src/strategy/strategies/ichimoku.py",
+            "src/risk/exit_manager.py",
+            "src/strategy/signal_blender.py",
         ]
         try:
             completed = subprocess.run(
@@ -658,10 +669,15 @@ class OptimizationLoop:
             return ""
 
     def _revert_changes(self) -> None:
-        """Revert both config files to HEAD using git checkout."""
+        """Revert config and strategy source files to HEAD using git checkout."""
         config_files = [
             str(_STRATEGY_CONFIG_PATH.relative_to(_REPO_ROOT)),
             str(_EDGES_CONFIG_PATH.relative_to(_REPO_ROOT)),
+            "src/strategy/strategies/asian_breakout.py",
+            "src/strategy/strategies/ema_pullback.py",
+            "src/strategy/strategies/ichimoku.py",
+            "src/risk/exit_manager.py",
+            "src/strategy/signal_blender.py",
         ]
         try:
             completed = subprocess.run(
