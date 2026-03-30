@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Itchy Tradebot - Optimization Dashboard</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f0f23;
+  --card: #1a1a2e;
+  --border: #333;
+  --text: #e0e0e0;
+  --muted: #888;
+  --accent: #00d2ff;
+  --up: #26a69a;
+  --down: #ef5350;
+  --win: #00ff88;
+  --loss: #ff4444;
+  --warn: #ffa726;
+}
+
+html, body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+}
+
+/* ── Header ── */
+#header {
+  height: 48px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+#header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+#conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+#conn-dot.ok   { background: var(--win); }
+#conn-dot.err  { background: var(--loss); }
+#conn-dot.poll { animation: pulse 1s infinite; background: var(--accent); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.75); }
+}
+
+#status-text {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 1;
+}
+
+#iter-count {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Main layout ── */
+#main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 12px;
+}
+
+/* ── Iteration table ── */
+#iter-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+#iter-table thead th {
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+#iter-table tbody tr {
+  border-bottom: 1px solid rgba(51,51,51,0.5);
+  transition: background 0.2s;
+}
+#iter-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+#iter-table tbody td {
+  padding: 7px 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.row-kept    { background: rgba(38,166,154,0.08); }
+.row-reverted { background: rgba(239,83,80,0.08); }
+.row-latest  { background: rgba(0,210,255,0.06); }
+.row-latest td:first-child { border-left: 3px solid var(--accent); }
+
+@keyframes row-pulse {
+  0%, 100% { background: rgba(0,210,255,0.06); }
+  50%       { background: rgba(0,210,255,0.14); }
+}
+.row-active { animation: row-pulse 1.4s ease-in-out infinite; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.badge-pass    { background: rgba(38,166,154,0.25); color: var(--up); }
+.badge-fail    { background: rgba(239,83,80,0.25); color: var(--down); }
+.badge-pending { background: rgba(255,167,38,0.2); color: var(--warn); }
+
+/* ── Pass rate chart ── */
+#chart-wrap {
+  position: relative;
+  width: 100%;
+}
+
+#pass-rate-svg {
+  width: 100%;
+  display: block;
+}
+
+/* ── Status grid ── */
+#status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 700px) {
+  #status-grid { grid-template-columns: 1fr; }
+}
+
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(51,51,51,0.4);
+  gap: 8px;
+}
+.kv-row:last-child { border-bottom: none; }
+.kv-key  { color: var(--muted); font-size: 11px; }
+.kv-val  { color: var(--text); font-size: 12px; font-weight: 500; }
+.kv-val.green { color: var(--win); }
+.kv-val.red   { color: var(--loss); }
+.kv-val.amber { color: var(--warn); }
+
+/* ── Failure breakdown ── */
+#failure-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.fail-chip {
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: rgba(239,83,80,0.18);
+  color: var(--down);
+  font-size: 11px;
+  border: 1px solid rgba(239,83,80,0.3);
+}
+
+/* ── Learnings ── */
+#learnings {
+  font-family: 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+#learnings::-webkit-scrollbar { width: 6px; }
+#learnings::-webkit-scrollbar-track { background: transparent; }
+#learnings::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── No-data placeholder ── */
+.no-data {
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+  padding: 24px 0;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Optimization Dashboard</h1>
+  <div id="conn-dot"></div>
+  <span id="status-text">Connecting...</span>
+  <span id="iter-count"></span>
+</div>
+
+<div id="main">
+
+  <!-- Iteration table -->
+  <div class="card">
+    <div class="card-title">Iteration Progress</div>
+    <table id="iter-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Run ID</th>
+          <th>Timestamp</th>
+          <th>Pass Rate</th>
+          <th>Ph1 Pass</th>
+          <th>Ph2 Pass</th>
+          <th>Trades</th>
+          <th>Win%</th>
+          <th>Sharpe</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody id="iter-body">
+        <tr><td colspan="10" class="no-data">Waiting for iterations...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pass rate chart -->
+  <div class="card">
+    <div class="card-title">Pass Rate Progression</div>
+    <div id="chart-wrap">
+      <svg id="pass-rate-svg" height="200" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+    </div>
+  </div>
+
+  <!-- Status + Failure breakdown -->
+  <div id="status-grid">
+    <div class="card">
+      <div class="card-title">Loop Status</div>
+      <div id="loop-status-content">
+        <div class="no-data">No status available</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Latest Failure Breakdown</div>
+      <div id="failure-content">
+        <div class="no-data">No data yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Learnings -->
+  <div class="card">
+    <div class="card-title">Claude's Learnings (CLAUDE.md)</div>
+    <pre id="learnings">No learnings file found yet.</pre>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function fmt(v, decimals=1) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = parseFloat(v);
+  if (isNaN(n)) return String(v);
+  return n.toFixed(decimals);
+}
+
+function pct(v) { return fmt(v, 1) + '%'; }
+
+function badge(pass) {
+  if (pass === null || pass === undefined) return '<span class="badge badge-pending">—</span>';
+  if (pass === true  || pass === 'pass')  return '<span class="badge badge-pass">PASS</span>';
+  return '<span class="badge badge-fail">FAIL</span>';
+}
+
+function relTime(ts) {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    const diff = Math.floor((Date.now() - d) / 1000);
+    if (diff < 5)    return 'just now';
+    if (diff < 60)   return diff + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return d.toLocaleDateString();
+  } catch { return ts; }
+}
+
+// ─── Table ───────────────────────────────────────────────────────────────────
+
+function updateTable(iterations) {
+  const tbody = document.getElementById('iter-body');
+  if (!iterations || iterations.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" class="no-data">Waiting for iterations...</td></tr>';
+    return;
+  }
+
+  let html = '';
+  iterations.forEach((iter, idx) => {
+    const m   = iter.metrics || {};
+    const cs  = iter.challenge_simulation || {};
+    const num = idx + 1;
+    const isLast = idx === iterations.length - 1;
+
+    // Derive values
+    const passRate  = cs.pass_rate   ?? m.pass_rate   ?? null;
+    const ph1Pass   = cs.phase1_pass ?? m.phase1_pass ?? null;
+    const ph2Pass   = cs.phase2_pass ?? m.phase2_pass ?? null;
+    const trades    = m.total_trades ?? m.n_trades    ?? '—';
+    const winPct    = m.win_rate_pct ?? (m.win_rate != null ? m.win_rate * 100 : null);
+    const sharpe    = m.sharpe_ratio ?? m.sharpe       ?? null;
+    const kept      = cs.kept ?? cs.accepted ?? null;
+
+    // Row class
+    let rowCls = '';
+    if (isLast && kept === null) rowCls = 'row-active row-latest';
+    else if (isLast)             rowCls = 'row-latest';
+    else if (kept === true)      rowCls = 'row-kept';
+    else if (kept === false)     rowCls = 'row-reverted';
+
+    // Verdict badge
+    let verdictBadge;
+    if (kept === null) verdictBadge = '<span class="badge badge-pending">Running</span>';
+    else if (kept)     verdictBadge = '<span class="badge badge-pass">Kept</span>';
+    else               verdictBadge = '<span class="badge badge-fail">Reverted</span>';
+
+    // Pass rate colouring
+    const prNum = parseFloat(passRate);
+    const prColor = isNaN(prNum) ? '' : (prNum >= 70 ? 'color:var(--win)' : prNum >= 50 ? 'color:var(--warn)' : 'color:var(--loss)');
+    const prDisplay = passRate !== null ? `<span style="${prColor};font-weight:600">${fmt(passRate,1)}%</span>` : '—';
+
+    html += `<tr class="${rowCls}">
+      <td>${num}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--muted)">${(iter.run_id||'').slice(0,12)||'—'}</td>
+      <td style="color:var(--muted);font-size:11px">${relTime(iter.timestamp)}</td>
+      <td>${prDisplay}</td>
+      <td>${badge(ph1Pass)}</td>
+      <td>${badge(ph2Pass)}</td>
+      <td style="color:var(--accent)">${trades}</td>
+      <td>${winPct !== null ? pct(winPct) : '—'}</td>
+      <td>${fmt(sharpe, 2)}</td>
+      <td>${verdictBadge}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
+}
+
+// ─── SVG Chart ───────────────────────────────────────────────────────────────
+
+function updateChart(iterations) {
+  const svg = document.getElementById('pass-rate-svg');
+
+  // Filter iterations that have a numeric pass_rate
+  const pts = iterations
+    .map((it, i) => {
+      const cs = it.challenge_simulation || {};
+      const m  = it.metrics || {};
+      const v  = cs.pass_rate ?? m.pass_rate ?? null;
+      return { x: i + 1, y: v !== null ? parseFloat(v) : null };
+    })
+    .filter(p => p.y !== null && !isNaN(p.y));
+
+  if (pts.length === 0) {
+    svg.innerHTML = '<text x="400" y="100" text-anchor="middle" fill="#555" font-size="12">No data yet</text>';
+    return;
+  }
+
+  const W = 800, H = 200;
+  const padL = 44, padR = 20, padT = 16, padB = 30;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const n = Math.max(iterations.length, 1);
+  const xScale = i => padL + ((i - 1) / Math.max(n - 1, 1)) * plotW;
+  const yMin = 0, yMax = 100;
+  const yScale = v => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  let out = '';
+
+  // Grid lines at 0, 25, 50, 75, 100
+  [0, 25, 50, 75, 100].forEach(yv => {
+    const y = yScale(yv);
+    const isMajor = yv === 0 || yv === 50 || yv === 100;
+    out += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"
+      stroke="${isMajor ? '#333' : '#222'}" stroke-width="1"/>`;
+    out += `<text x="${padL - 4}" y="${y + 4}" text-anchor="end" fill="#555" font-size="10">${yv}</text>`;
+  });
+
+  // 70% target line (pass threshold)
+  const y70 = yScale(70);
+  out += `<line x1="${padL}" y1="${y70}" x2="${W - padR}" y2="${y70}"
+    stroke="#26a69a" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>`;
+  out += `<text x="${W - padR + 2}" y="${y70 + 4}" fill="#26a69a" font-size="10" opacity="0.7">70%</text>`;
+
+  // X-axis labels (every iteration or every Nth)
+  const step = pts.length <= 20 ? 1 : Math.ceil(pts.length / 20);
+  pts.forEach(p => {
+    if ((p.x - 1) % step === 0 || p.x === pts.length) {
+      out += `<text x="${xScale(p.x)}" y="${H - padB + 14}" text-anchor="middle"
+        fill="#555" font-size="10">${p.x}</text>`;
+    }
+  });
+  out += `<text x="${padL + plotW / 2}" y="${H - 2}" text-anchor="middle" fill="#444" font-size="10">Iteration</text>`;
+
+  // Line path
+  const pathD = pts.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'} ${xScale(p.x).toFixed(1)},${yScale(p.y).toFixed(1)}`
+  ).join(' ');
+
+  // Filled area under the line
+  const areaD = pathD +
+    ` L ${xScale(pts[pts.length - 1].x).toFixed(1)},${(padT + plotH).toFixed(1)}` +
+    ` L ${xScale(pts[0].x).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+
+  out += `<defs>
+    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#00d2ff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#00d2ff" stop-opacity="0.01"/>
+    </linearGradient>
+  </defs>`;
+  out += `<path d="${areaD}" fill="url(#areaGrad)" stroke="none"/>`;
+  out += `<path d="${pathD}" fill="none" stroke="#00d2ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // Dots
+  pts.forEach((p, i) => {
+    const isLast = i === pts.length - 1;
+    const color = p.y >= 70 ? '#26a69a' : p.y >= 50 ? '#ffa726' : '#ef5350';
+    out += `<circle cx="${xScale(p.x).toFixed(1)}" cy="${yScale(p.y).toFixed(1)}"
+      r="${isLast ? 5 : 3.5}" fill="${color}" stroke="${isLast ? '#fff' : 'none'}"
+      stroke-width="${isLast ? 1.5 : 0}"/>`;
+    if (isLast) {
+      out += `<text x="${xScale(p.x).toFixed(1)}" y="${(yScale(p.y) - 9).toFixed(1)}"
+        text-anchor="middle" fill="${color}" font-size="11" font-weight="600">${p.y.toFixed(1)}%</text>`;
+    }
+  });
+
+  svg.innerHTML = out;
+}
+
+// ─── Loop Status ─────────────────────────────────────────────────────────────
+
+function updateLoopStatus(loopStatus, totalIter) {
+  const el = document.getElementById('loop-status-content');
+  if (!loopStatus || Object.keys(loopStatus).length === 0) {
+    el.innerHTML = '<div class="no-data">No loop_status.json found</div>';
+    return;
+  }
+
+  const rows = [
+    ['Iteration', loopStatus.current_iteration ?? loopStatus.iteration ?? totalIter],
+    ['Phase',     loopStatus.phase ?? loopStatus.state ?? '—'],
+    ['Best Pass Rate', loopStatus.best_pass_rate != null ? pct(loopStatus.best_pass_rate) : '—'],
+    ['Last Action', loopStatus.last_action ?? '—'],
+    ['Started',    loopStatus.started_at ? relTime(loopStatus.started_at) : '—'],
+    ['Updated',    loopStatus.updated_at ? relTime(loopStatus.updated_at) : '—'],
+  ];
+
+  let html = '';
+  rows.forEach(([k, v]) => {
+    html += `<div class="kv-row"><span class="kv-key">${k}</span><span class="kv-val">${v}</span></div>`;
+  });
+  el.innerHTML = html;
+}
+
+// ─── Failure Breakdown ───────────────────────────────────────────────────────
+
+function updateFailureBreakdown(iterations) {
+  const el = document.getElementById('failure-content');
+  if (!iterations || iterations.length === 0) {
+    el.innerHTML = '<div class="no-data">No data yet</div>';
+    return;
+  }
+
+  const latest = iterations[iterations.length - 1];
+  const cs = latest.challenge_simulation || {};
+  const m  = latest.metrics || {};
+
+  // Collect failure reasons
+  const failures = [];
+  if (cs.profit_target_hit === false || m.profit_target_hit === false)
+    failures.push('Profit target not hit');
+  if (cs.max_drawdown_breached === true || m.max_drawdown_breached === true)
+    failures.push('Max drawdown breached');
+  if (cs.daily_drawdown_breached === true || m.daily_drawdown_breached === true)
+    failures.push('Daily DD breached');
+  if (cs.min_trading_days_met === false || m.min_trading_days_met === false)
+    failures.push('Min trading days not met');
+  if (cs.news_filter_breach === true)
+    failures.push('News filter breach');
+  if (cs.consistency_rule_breach === true)
+    failures.push('Consistency rule breach');
+
+  // Also check a failures array in the data
+  const raw = cs.failures ?? cs.failure_reasons ?? m.failures ?? [];
+  if (Array.isArray(raw)) raw.forEach(r => { if (!failures.includes(r)) failures.push(r); });
+
+  const passRate = cs.pass_rate ?? m.pass_rate ?? null;
+  const prNum = passRate !== null ? parseFloat(passRate) : NaN;
+
+  let html = '';
+
+  // Show metrics summary
+  html += `<div class="kv-row">
+    <span class="kv-key">Pass Rate</span>
+    <span class="kv-val ${!isNaN(prNum) ? (prNum>=70?'green':prNum>=50?'amber':'red') : ''}">
+      ${passRate !== null ? pct(passRate) : '—'}
+    </span>
+  </div>`;
+
+  const totalTrades = m.total_trades ?? m.n_trades ?? null;
+  if (totalTrades !== null) {
+    html += `<div class="kv-row"><span class="kv-key">Trades</span><span class="kv-val">${totalTrades}</span></div>`;
+  }
+
+  if (failures.length > 0) {
+    html += `<div style="margin-top:10px"><div class="kv-key" style="margin-bottom:6px">Failure Reasons</div>
+      <div id="failure-list">`;
+    failures.forEach(f => { html += `<span class="fail-chip">${f}</span>`; });
+    html += `</div></div>`;
+  } else if (prNum >= 70) {
+    html += `<div style="margin-top:10px;color:var(--win);font-size:12px">All checks passed!</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// ─── Learnings ───────────────────────────────────────────────────────────────
+
+function updateLearnings(text) {
+  const el = document.getElementById('learnings');
+  el.textContent = text && text.trim() ? text : 'No learnings file found yet.';
+}
+
+// ─── Header status ───────────────────────────────────────────────────────────
+
+function setConnStatus(state) {
+  const dot  = document.getElementById('conn-dot');
+  const txt  = document.getElementById('status-text');
+  dot.className = '';
+  if (state === 'ok') {
+    dot.classList.add('ok');
+    txt.textContent = 'Connected — auto-refreshing every 2s';
+  } else if (state === 'poll') {
+    dot.classList.add('poll');
+    txt.textContent = 'Polling...';
+  } else {
+    dot.classList.add('err');
+    txt.textContent = 'Server unavailable — retrying...';
+  }
+}
+
+// ─── Main poll ───────────────────────────────────────────────────────────────
+
+let _lastTotal = -1;
+
+async function poll() {
+  setConnStatus('poll');
+  try {
+    const res = await fetch('/api/state', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    setConnStatus('ok');
+
+    const total = data.total_iterations || 0;
+    document.getElementById('iter-count').textContent =
+      total ? `${total} iteration${total !== 1 ? 's' : ''}` : '';
+
+    updateTable(data.iterations || []);
+    updateChart(data.iterations || []);
+    updateLoopStatus(data.loop_status || {}, total);
+    updateFailureBreakdown(data.iterations || []);
+    updateLearnings(data.learnings || '');
+
+    _lastTotal = total;
+  } catch (e) {
+    setConnStatus('err');
+  }
+}
+
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>
