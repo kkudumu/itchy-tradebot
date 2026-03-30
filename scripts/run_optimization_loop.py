@@ -156,18 +156,29 @@ class OptimizationLoop:
             len(opt_df),
         )
 
-        # Start live optimization dashboard
+        # Start unified tabbed dashboard (port 8501)
+        # Tab 1: Live Trading (equity curve, trades)
+        # Tab 2: Optimization (iterations, pass rates, Claude's reasoning)
         _dashboard = None
+        self._live_dashboard = None
         try:
+            from src.backtesting.live_dashboard import LiveDashboardServer
             from src.backtesting.optimization_dashboard import OptimizationDashboardServer
+
+            # Create the live dashboard (manages state + candle buffer)
+            self._live_dashboard = LiveDashboardServer(port=0, auto_open=False)
+            # Don't start its HTTP server — we just use it as a state container
+
+            # Create the unified dashboard server that proxies live state
             resolved_reports = self._config.get("persistence", {}).get("reports_dir", "reports")
             _dashboard = OptimizationDashboardServer(
-                port=8502, reports_dir=str(resolved_reports), auto_open=True,
+                port=8501, reports_dir=str(resolved_reports), auto_open=True,
+                live_dashboard=self._live_dashboard,
             )
             _dashboard.start()
-            logger.info("Optimization dashboard started at http://localhost:8502")
+            logger.info("Dashboard at http://localhost:8501 (Live Trading + Optimization tabs)")
         except Exception as exc:
-            logger.warning("Could not start optimization dashboard: %s", exc)
+            logger.warning("Could not start dashboard: %s", exc)
 
         history: List[Dict[str, Any]] = []
         best_metrics: Dict[str, Any] = {}
@@ -418,7 +429,13 @@ class OptimizationLoop:
     def _run_backtest(self, df: pd.DataFrame, config: Dict[str, Any]) -> Any:
         """Instantiate the backtester and run it on *df*."""
         backtester = _BacktesterClass(config=config)
-        return backtester.run(df)
+
+        # Start live trade dashboard if not already running
+        live_dash = None
+        if self._live_dashboard is not None:
+            live_dash = self._live_dashboard
+
+        return backtester.run(df, live_dashboard=live_dash)
 
     def _build_claude_prompt(
         self,
