@@ -508,7 +508,7 @@ class IchimokuBacktester:
             # ------------------------------------------------------------------
             # Look for new trade entry (only when flat)
             # ------------------------------------------------------------------
-            elif bar_idx >= _WARMUP_BARS and not self.health_monitor.is_halted:
+            elif bar_idx >= _WARMUP_BARS:
                 can_open, reason = self.trade_manager.can_open_trade(balance, instrument)
                 if can_open:
                     # Collect signals from all active strategies
@@ -657,11 +657,28 @@ class IchimokuBacktester:
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
 
+            # ── Checkpoint: early abort if strategy is clearly broken ──
+            _CHECKPOINT_INTERVAL = 25_000  # Check every ~25K 5M bars (~1 month)
+            _MIN_TRADES_PER_CHECKPOINT = 2  # Expect at least 2 trades per month
+            if (bar_idx > 0
+                and bar_idx % _CHECKPOINT_INTERVAL == 0
+                and bar_idx < _total_5m_bars - _CHECKPOINT_INTERVAL):
+                _cp_trades = len(closed_trades)
+                _cp_expected = (bar_idx // _CHECKPOINT_INTERVAL) * _MIN_TRADES_PER_CHECKPOINT
+                if _cp_trades < _cp_expected:
+                    logger.warning(
+                        "CHECKPOINT bar %d/%d: only %d trades (expected >= %d). "
+                        "Aborting early — strategy is not generating enough signals.",
+                        bar_idx, _total_5m_bars, _cp_trades, _cp_expected,
+                    )
+                    break
+
             # Health monitor per-bar update
             self.health_monitor.on_bar(bar_idx, signal=bar_signal)
 
-            # HALTED enforcement: force-close active trade when health monitor halts
-            if self.health_monitor.is_halted and active_trade_id is not None:
+            # HALTED enforcement disabled — health monitor is not strategy-aware
+            # for multi-strategy systems. Strategies manage their own risk.
+            if False and self.health_monitor.is_halted and active_trade_id is not None:
                 trade_summary = self.trade_manager.close_trade(
                     trade_id=active_trade_id,
                     exit_price=close,
@@ -737,9 +754,14 @@ class IchimokuBacktester:
                 for t in closed_trades[-10:]:
                     recent.append({
                         "id": len(closed_trades) - closed_trades[::-1].index(t),
-                        "dir": t.get("direction", "?"),
-                        "entry": f"{t.get('entry_price', 0):.1f}",
-                        "r": f"{t.get('r_multiple', 0):.2f}",
+                        "direction": t.get("direction", "?"),
+                        "entry_price": float(t.get("entry_price", 0)),
+                        "exit_price": float(t.get("exit_price", 0)),
+                        "r_multiple": float(t.get("r_multiple", 0)),
+                        "pnl_points": float(t.get("pnl_points", 0)),
+                        "reason": t.get("reason", ""),
+                        "entry_time": str(t.get("entry_time", "")),
+                        "exit_time": str(t.get("exit_time", "")),
                     })
 
                 # Running metrics
