@@ -670,9 +670,14 @@ class TestRunLoop:
 
 class TestRevertOnWorsening:
     def test_revert_called_when_sharpe_drops(self, loop_mod, tmp_configs):
-        """If re-run sharpe < initial sharpe, _revert_changes must be called."""
+        """If re-run sharpe < initial sharpe, _revert_changes must be called.
+
+        Requires max_iterations >= 2 so that iteration 1 reaches the Claude
+        spawn path (the guard ``if iteration == max_iterations: break`` skips
+        Claude on the very last iteration to avoid wasted API calls).
+        """
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=5.0,
+            max_iterations=2, target_sharpe=5.0,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -683,8 +688,8 @@ class TestRevertOnWorsening:
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
 
-        # First call returns sharpe=0.8, second (after Claude changes) returns 0.5
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=0.5)]
+        # Calls: iter-1 backtest → iter-1 re-run (after Claude, worse) → iter-2 backtest
+        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=0.5), _FakeResult(sharpe=0.5)]
         run_idx = [0]
 
         def _alternating_run(df):
@@ -705,8 +710,12 @@ class TestRevertOnWorsening:
         mock_revert.assert_called_once()
 
     def test_no_revert_when_sharpe_improves(self, loop_mod, tmp_configs):
+        """No revert when the re-run sharpe is equal or better.
+
+        Uses max_iterations=2 for the same reason as the revert test above.
+        """
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=5.0,
+            max_iterations=2, target_sharpe=5.0,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -717,7 +726,8 @@ class TestRevertOnWorsening:
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
 
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.2)]
+        # iter-1 backtest → iter-1 re-run (better) → iter-2 backtest
+        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.2), _FakeResult(sharpe=1.2)]
         run_idx = [0]
 
         def _alternating_run(df):
@@ -744,8 +754,12 @@ class TestRevertOnWorsening:
 
 class TestLearningAppended:
     def test_learning_written_after_iteration_with_changes(self, loop_mod, tmp_configs):
+        """Learning is appended to CLAUDE.md when config changes improve metrics.
+
+        Uses max_iterations=2 so iteration 1 reaches the Claude spawn path.
+        """
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=5.0,
+            max_iterations=2, target_sharpe=5.0,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
@@ -756,11 +770,12 @@ class TestLearningAppended:
             claude_md_path=str(tmp_configs / "CLAUDE.md"),
         )
 
-        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.0)]
+        # iter-1 backtest → iter-1 re-run (improved) → iter-2 backtest
+        run_values = [_FakeResult(sharpe=0.8), _FakeResult(sharpe=1.0), _FakeResult(sharpe=1.0)]
         run_idx = [0]
 
         def _run(df):
-            r = run_values[min(run_idx[0], 1)]
+            r = run_values[min(run_idx[0], len(run_values) - 1)]
             run_idx[0] += 1
             return r
 
@@ -779,9 +794,13 @@ class TestLearningAppended:
         assert "Strategy Learnings" in content
 
     def test_learning_written_even_without_changes(self, loop_mod, tmp_configs):
-        """A '(no changes)' learning is appended when Claude makes no diff."""
+        """A '(no changes)' learning is appended when Claude makes no diff.
+
+        Uses max_iterations=2 so iteration 1 reaches the Claude spawn path,
+        which then detects an empty diff and records '(no changes)'.
+        """
         cfg = _make_loop_config(
-            max_iterations=1, target_sharpe=5.0,
+            max_iterations=2, target_sharpe=5.0,
             reports_dir=str(tmp_configs / "reports"),
         )
         cfg["validation"]["run_full_dataset"] = False
