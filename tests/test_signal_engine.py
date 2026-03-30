@@ -696,11 +696,11 @@ class TestFifteenMinuteSignal:
         assert not passes
         assert "cloud" in reason.lower()
 
-    def test_chikou_not_confirming_fails(self):
+    def test_chikou_neutral_does_not_block(self):
         state = _bullish_signal_state(chikou_confirmed=0)
         passes, reason = self.engine._check_15m_signal(state, "long")
-        assert not passes
-        assert "Chikou" in reason
+        assert passes
+        assert "Chikou neutral" in reason
 
     def test_opposing_tk_cross_fails(self):
         state = _bearish_signal_state()
@@ -919,3 +919,71 @@ class TestComputeIndicators:
         analyzer = MTFAnalyzer()
         result = analyzer.compute_indicators(df)
         assert isinstance(result["adx"], ADXResult)
+
+
+# ---------------------------------------------------------------------------
+# Tests: Ichimoku 15M-only mode (no 4H/1H gates)
+# ---------------------------------------------------------------------------
+
+class TestIchimoku15MMode:
+    """Test Ichimoku strategy with 15M cloud as trend filter (no 4H/1H gates)."""
+
+    def test_generates_signal_with_15m_trend_only(self):
+        """With 15M cloud bullish + 5M conditions met, should produce a long signal
+        even without 4H/1H alignment."""
+        from src.strategy.strategies.ichimoku import IchimokuStrategy
+        from src.strategy.base import EvalMatrix, EvaluatorResult
+
+        config = {"timeframes": ["15M", "5M"], "min_confluence_score": 2, "adx_threshold": 20}
+        strategy = IchimokuStrategy(config=config)
+
+        matrix = EvalMatrix()
+        matrix.set("ichimoku_15M", EvaluatorResult(
+            direction=1.0, confidence=0.8,
+            metadata={"cloud_direction": 1, "tk_cross": 1, "cloud_position": 1, "chikou_confirmed": 1},
+        ))
+        matrix.set("ichimoku_5M", EvaluatorResult(
+            direction=1.0, confidence=0.7,
+            metadata={"kijun": 2050.0, "close": 2052.0, "atr": 5.0, "cloud_direction": 1,
+                       "tk_cross": 1, "cloud_position": 1, "chikou_confirmed": 1},
+        ))
+        matrix.set("adx_15M", EvaluatorResult(
+            direction=0.0, confidence=0.0,
+            metadata={"adx": 25.0, "trending": True},
+        ))
+        matrix.set("atr_15M", EvaluatorResult(
+            direction=0.0, confidence=0.0,
+            metadata={"atr": 8.0},
+        ))
+        matrix.set("session_5M", EvaluatorResult(
+            direction=0.0, confidence=0.0,
+            metadata={"session": "london"},
+        ))
+
+        signal = strategy.decide(matrix)
+        assert signal is not None
+        assert signal.direction == "long"
+
+    def test_no_signal_when_15m_cloud_flat(self):
+        from src.strategy.strategies.ichimoku import IchimokuStrategy
+        from src.strategy.base import EvalMatrix, EvaluatorResult
+
+        config = {"timeframes": ["15M", "5M"], "min_confluence_score": 2}
+        strategy = IchimokuStrategy(config=config)
+
+        matrix = EvalMatrix()
+        matrix.set("ichimoku_15M", EvaluatorResult(
+            direction=0.0, confidence=0.0,
+            metadata={"cloud_direction": 0, "tk_cross": 0, "cloud_position": 0, "chikou_confirmed": 0},
+        ))
+        matrix.set("ichimoku_5M", EvaluatorResult(
+            direction=1.0, confidence=0.7,
+            metadata={"kijun": 2050.0, "close": 2052.0, "atr": 5.0, "cloud_direction": 1,
+                       "tk_cross": 1, "cloud_position": 1, "chikou_confirmed": 1},
+        ))
+        matrix.set("adx_15M", EvaluatorResult(direction=0.0, confidence=0.0, metadata={"adx": 25.0, "trending": True}))
+        matrix.set("atr_15M", EvaluatorResult(direction=0.0, confidence=0.0, metadata={"atr": 8.0}))
+        matrix.set("session_5M", EvaluatorResult(direction=0.0, confidence=0.0, metadata={"session": "london"}))
+
+        signal = strategy.decide(matrix)
+        assert signal is None
