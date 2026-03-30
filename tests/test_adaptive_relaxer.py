@@ -108,7 +108,7 @@ class TestRegimeFilterSetters:
         rf = RegimeFilter({"params": {"adx_min": 28, "cloud_thickness_percentile": 0.0}})
         ctx = MagicMock()
         ctx.adx = 24.0
-        ctx.cloud_thickness = 10.0
+        ctx.indicator_values = {'cloud_thickness': 10.0}
         # Before: ADX 24 < 28 → blocked
         result_before = rf.should_allow(ctx)
         assert not result_before.allowed

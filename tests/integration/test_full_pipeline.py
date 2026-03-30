@@ -229,8 +229,7 @@ class TestIndicatorToEdgeContextFlow:
             session="london",
             adx=32.0,
             atr=8.0,
-            cloud_thickness=15.0,
-            kijun_value=1900.0,
+            indicator_values={'kijun': 1900.0, 'cloud_thickness': 15.0},
             bb_squeeze=False,
             confluence_score=5,
         )
