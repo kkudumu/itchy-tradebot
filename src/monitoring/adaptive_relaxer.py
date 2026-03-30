@@ -411,6 +411,14 @@ class AdaptiveRelaxer:
         """True when the relaxation budget has reached its maximum."""
         return self._state.is_halted
 
+    def capture_current_config(self) -> dict:
+        """Snapshot current EdgeManager parameter values.
+
+        Returns the same dict shape as ``RelaxationState.base_config`` but
+        reflecting the *current* (possibly relaxed) parameter values.
+        """
+        return self._capture_base_config()
+
     def shield_clamp(self, param: str, value: float) -> float:
         """Clamp a parameter value to its shield bounds.
 

@@ -1,0 +1,10 @@
+## Strategy Learnings
+- Run opt_iter_001_20260330_173002: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_002_20260330_174717: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_003_20260330_180204: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_004_20260330_180847: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_005_20260330_181517: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_006_20260330_182136: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_007_20260330_182755: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_008_20260330_183423: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)
+- Run opt_iter_009_20260330_184110: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips → WinRate 6.7%→6.7% (kept)

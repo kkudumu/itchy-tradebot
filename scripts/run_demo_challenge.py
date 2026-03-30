@@ -301,6 +301,7 @@ def run_backtest(args: argparse.Namespace) -> int:
         from src.backtesting.vectorbt_engine import IchimokuBacktester
 
         backtester = IchimokuBacktester(
+            config={"edges": app_config.edges.model_dump()} if hasattr(app_config, "edges") else None,
             initial_balance=args.initial_balance,
             prop_firm_profit_target_pct=8.0,
             prop_firm_max_daily_dd_pct=5.0,

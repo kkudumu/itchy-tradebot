@@ -999,3 +999,98 @@ class TestTransitions:
         monitor.on_bar(1)   # → RELAXING
         assert monitor.transitions[0]["to"] == "drought_detected"
         assert monitor.transitions[1]["to"] == "relaxing"
+
+
+# ---------------------------------------------------------------------------
+# 17. on_halt callback
+# ---------------------------------------------------------------------------
+
+
+class TestOnHaltCallback:
+    def test_on_halt_called_on_budget_exhaustion(self):
+        """on_halt callback fires when transitioning to HALTED via budget exhaustion."""
+        halt_reasons: list[str] = []
+        funnel = MockFunnelTracker(is_drought_val=True)
+        relaxer = MockAdaptiveRelaxer(relax_returns=False, budget_exhausted=True)
+        monitor = _make_monitor(funnel=funnel, relaxer=relaxer)
+        monitor._on_halt = lambda reason: halt_reasons.append(reason)
+
+        monitor.on_bar(0)  # NORMAL → DROUGHT_DETECTED
+        monitor.on_bar(1)  # DROUGHT → relax fails + budget exhausted → HALTED
+
+        assert len(halt_reasons) == 1
+        assert "budget exhausted" in halt_reasons[0]
+
+    def test_on_halt_called_on_strategy_broken(self):
+        """on_halt callback fires when diagnosis is strategy_broken."""
+        halt_reasons: list[str] = []
+        regime = MockRegimeDetector(diagnosis=DiagnosisResult.STRATEGY_BROKEN)
+        monitor = _make_monitor(regime=regime, baseline_win_rate=0.55)
+        monitor._on_halt = lambda reason: halt_reasons.append(reason)
+
+        # Feed 10 losing trades to trigger diagnosis
+        for _ in range(10):
+            monitor.on_trade_closed(won=False)
+
+        assert len(halt_reasons) == 1
+        assert "strategy broken" in halt_reasons[0]
+
+    def test_on_halt_not_called_in_normal_transitions(self):
+        """on_halt callback does NOT fire on non-HALTED transitions."""
+        halt_reasons: list[str] = []
+        funnel = MockFunnelTracker(is_drought_val=True)
+        relaxer = MockAdaptiveRelaxer(relax_returns=True)
+        monitor = _make_monitor(funnel=funnel, relaxer=relaxer)
+        monitor._on_halt = lambda reason: halt_reasons.append(reason)
+
+        monitor.on_bar(0)  # → DROUGHT_DETECTED
+        monitor.on_bar(1)  # → RELAXING
+
+        assert len(halt_reasons) == 0
+
+    def test_on_halt_none_by_default(self):
+        """No crash when on_halt callback is not provided."""
+        funnel = MockFunnelTracker(is_drought_val=True)
+        relaxer = MockAdaptiveRelaxer(relax_returns=False, budget_exhausted=True)
+        monitor = _make_monitor(funnel=funnel, relaxer=relaxer)
+
+        monitor.on_bar(0)  # → DROUGHT_DETECTED
+        monitor.on_bar(1)  # → HALTED (no callback, no crash)
+        assert monitor.is_halted
+
+    def test_on_halt_exception_does_not_crash_monitor(self):
+        """If on_halt callback raises, the monitor still transitions to HALTED."""
+        def bad_callback(reason: str):
+            raise RuntimeError("callback boom")
+
+        funnel = MockFunnelTracker(is_drought_val=True)
+        relaxer = MockAdaptiveRelaxer(relax_returns=False, budget_exhausted=True)
+        monitor = _make_monitor(funnel=funnel, relaxer=relaxer)
+        monitor._on_halt = bad_callback
+
+        monitor.on_bar(0)  # → DROUGHT_DETECTED
+        monitor.on_bar(1)  # → HALTED (callback raises but we survive)
+        assert monitor.is_halted
+
+    def test_on_halt_callback_via_constructor(self):
+        """on_halt can be set through the constructor parameter."""
+        halt_reasons: list[str] = []
+        signal_engine = MagicMock()
+        edge_manager = MagicMock()
+
+        _funnel = MockFunnelTracker(is_drought_val=True)
+        _relaxer = MockAdaptiveRelaxer(relax_returns=False, budget_exhausted=True)
+        _regime = MockRegimeDetector()
+
+        with patch("src.monitoring.health_monitor.SignalFunnelTracker", return_value=_funnel), \
+             patch("src.monitoring.health_monitor.AdaptiveRelaxer", return_value=_relaxer), \
+             patch("src.monitoring.health_monitor.RegimeDetector", return_value=_regime):
+            monitor = StrategyHealthMonitor(
+                signal_engine=signal_engine,
+                edge_manager=edge_manager,
+                on_halt=lambda reason: halt_reasons.append(reason),
+            )
+
+        monitor.on_bar(0)  # → DROUGHT_DETECTED
+        monitor.on_bar(1)  # → HALTED
+        assert len(halt_reasons) == 1

@@ -73,7 +73,7 @@ def _resample_ohlcv(df_1m: pd.DataFrame, rule: str) -> pd.DataFrame:
     # Only aggregate columns that are present
     available = {k: v for k, v in agg.items() if k in df_1m.columns}
     resampled = df_1m.resample(rule, label="left", closed="left").agg(available)
-    return resampled.dropna(how="all")
+    return resampled.dropna(subset=["close"])
 
 
 # ---------------------------------------------------------------------------

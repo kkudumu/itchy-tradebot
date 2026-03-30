@@ -592,7 +592,7 @@ class TestScanSampleLogic:
 
 
 class TestAutoRelaxLoop:
-    """_auto_relax_loop returns correct (signals, tier, aborted) tuples."""
+    """_auto_relax_loop returns correct (signals, tier, aborted, relaxed_config) tuples."""
 
     def test_returns_tuple_of_three(self, edge_manager, candles_6k):
         engine = NeverSignalEngine()
@@ -601,7 +601,7 @@ class TestAutoRelaxLoop:
         from src.monitoring.funnel_tracker import SignalFunnelTracker
         tracker = SignalFunnelTracker()
         result = pf._auto_relax_loop(sample, tracker)
-        assert len(result) == 3
+        assert len(result) == 4
 
     def test_aborted_when_never_engine(self, edge_manager, candles_6k):
         engine = NeverSignalEngine()
@@ -609,9 +609,10 @@ class TestAutoRelaxLoop:
         sample = pf._sample_data(candles_6k)
         from src.monitoring.funnel_tracker import SignalFunnelTracker
         tracker = SignalFunnelTracker()
-        signals, tier, aborted = pf._auto_relax_loop(sample, tracker)
+        signals, tier, aborted, relaxed_cfg = pf._auto_relax_loop(sample, tracker)
         assert signals == 0
         assert aborted is True
+        assert relaxed_cfg is None
 
     def test_not_aborted_when_engine_signals_eventually(self, edge_manager, candles_6k):
         """Engine that starts signalling after 200 calls should succeed."""
@@ -630,10 +631,11 @@ class TestAutoRelaxLoop:
         sample = pf._sample_data(candles_6k)
         from src.monitoring.funnel_tracker import SignalFunnelTracker
         tracker = SignalFunnelTracker()
-        signals, tier, aborted = pf._auto_relax_loop(sample, tracker)
+        signals, tier, aborted, relaxed_cfg = pf._auto_relax_loop(sample, tracker)
         assert aborted is False
         assert signals > 0
         assert tier >= 1
+        assert relaxed_cfg is not None
 
 
 # ---------------------------------------------------------------------------
@@ -691,3 +693,82 @@ class TestRunIntegration:
         engine = AlwaysSignalEngine()
         result = PreFlightDiagnostic(engine, edge_manager).run(candles_6k)
         assert isinstance(result, PreFlightResult)
+
+
+# ---------------------------------------------------------------------------
+# 11. relaxed_config field
+# ---------------------------------------------------------------------------
+
+
+class TestRelaxedConfig:
+    """Tests for the PreFlightResult.relaxed_config field."""
+
+    def test_no_relaxation_returns_none(self, edge_manager, candles_6k):
+        """When signals are found on first scan, relaxed_config is None."""
+        engine = AlwaysSignalEngine()
+        result = PreFlightDiagnostic(engine, edge_manager).run(candles_6k)
+        assert result.relaxed_config is None
+
+    def test_aborted_returns_none(self, edge_manager, candles_6k):
+        """When all tiers exhausted, relaxed_config is None."""
+        engine = NeverSignalEngine()
+        result = PreFlightDiagnostic(engine, edge_manager).run(candles_6k)
+        assert result.relaxed_config is None
+
+    def test_empty_candles_returns_none(self, edge_manager):
+        """Empty candle input → aborted, relaxed_config is None."""
+        engine = AlwaysSignalEngine()
+        result = PreFlightDiagnostic(engine, edge_manager).run(pd.DataFrame())
+        assert result.relaxed_config is None
+
+    def test_relaxation_success_returns_config_dict(self, edge_manager, candles_6k):
+        """When relaxation fixes the drought, relaxed_config is a non-empty dict."""
+
+        class _SignalAfterRelax:
+            """Signals only after the first full scan fails (simulates relaxation fix)."""
+
+            def __init__(self):
+                self._scan_count = 0
+                self._threshold = 200  # signals after this many scans
+
+            def scan(self, data_1m, current_bar=-1):
+                self._scan_count += 1
+                if self._scan_count > self._threshold:
+                    return make_signal()
+                return None
+
+        engine = _SignalAfterRelax()
+        result = PreFlightDiagnostic(engine, edge_manager).run(candles_6k)
+
+        if result.relaxation_applied and result.passed:
+            assert result.relaxed_config is not None
+            assert isinstance(result.relaxed_config, dict)
+            assert len(result.relaxed_config) > 0
+
+    def test_relaxed_config_has_expected_keys(self, edge_manager, candles_6k):
+        """relaxed_config dict should contain edge parameter keys."""
+
+        class _SignalAfterRelax:
+            def __init__(self):
+                self._scan_count = 0
+
+            def scan(self, data_1m, current_bar=-1):
+                self._scan_count += 1
+                if self._scan_count > 200:
+                    return make_signal()
+                return None
+
+        engine = _SignalAfterRelax()
+        result = PreFlightDiagnostic(engine, edge_manager).run(candles_6k)
+
+        if result.relaxed_config is not None:
+            # Should contain at least some of the known edge parameter keys
+            known_prefixes = [
+                "day_of_week__", "time_of_day__", "london_open_delay__",
+                "regime_filter__", "confluence_scoring__",
+            ]
+            has_known_key = any(
+                any(k.startswith(p) for p in known_prefixes)
+                for k in result.relaxed_config
+            )
+            assert has_known_key

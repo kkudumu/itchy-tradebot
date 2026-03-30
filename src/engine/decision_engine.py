@@ -297,9 +297,28 @@ class DecisionEngine:
         for td in open_trade_decisions:
             self._log_decision(td)
 
-        # Step 4: check for a new entry signal
+        # Step 4: check for a new entry signal (skip when health monitor is HALTED)
         signal = None
         self._last_eval_matrix = None  # reset per scan cycle
+        if self.health_monitor is not None and self.health_monitor.is_halted:
+            decision = Decision(
+                timestamp=ts,
+                instrument=self._instrument,
+                action="skip",
+                signal=None,
+                edge_results={},
+                similarity_data={},
+                confluence_score=0,
+                reasoning="Health monitor HALTED — scanning disabled",
+            )
+            self._log_decision(decision)
+
+            # Health monitor per-scan update
+            self.health_monitor.on_bar(self._bar_idx, signal=None)
+            self._bar_idx += 1
+
+            return decision
+
         if self._strategy is not None and self._coordinator is not None:
             # Strategy interface path
             data_1m = data.get("1M")

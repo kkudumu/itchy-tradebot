@@ -147,7 +147,10 @@ class StrategyHealthMonitor:
         mode: str = "backtest",
         drought_window: int = 500,
         baseline_win_rate: float = 0.55,
+        on_halt: "Optional[callable]" = None,
     ) -> None:
+        # Halt callback — invoked with (reason: str) when transitioning to HALTED
+        self._on_halt = on_halt
         self._signal_engine = signal_engine
         self._edge_manager = edge_manager
         self._config = config or {}
@@ -451,6 +454,12 @@ class StrategyHealthMonitor:
             new_state.value,
             reason,
         )
+
+        if new_state == HealthState.HALTED and self._on_halt is not None:
+            try:
+                self._on_halt(reason)
+            except Exception as exc:
+                logger.error("on_halt callback failed: %s", exc)
 
     def _state_message(self) -> str:
         """Human-readable message for the current state."""

@@ -18,10 +18,10 @@ strategies:
       stop_multiplier: 2.5  # Initial stop = 2.5 × ATR beyond entry (widened: 1.5x too tight for gold volatility)
 
     signal:
-      min_confluence_score: 2
+      min_confluence_score: 1
       tier_a_plus: 7   # All major factors aligned — full risk allocation
       tier_b: 5        # Strong signal — 75% risk allocation
-      tier_c: 2        # Minimum viable signal — 50% risk allocation
+      tier_c: 1        # Minimum viable signal — 50% risk allocation
       timeframes:
         - "15M"
         - "5M"
@@ -32,8 +32,8 @@ strategies:
     asian_session_start_utc: "21:00"
     asian_session_end_utc: "06:00"
     london_entry_start_utc: "06:00"
-    london_entry_end_utc: "10:00"
-    min_range_pips: 20
+    london_entry_end_utc: "20:00"
+    min_range_pips: 3
     max_range_pips: 80
     rr_ratio: 2.0
     atr_period: 14
@@ -41,24 +41,24 @@ strategies:
   ema_pullback:
     enabled: true
     weight: 1.0
-    fast_ema: 14
+    fast_ema: 8
     mid_ema: 18
-    slow_ema: 24
+    slow_ema: 50
     atr_period: 14
-    min_ema_angle_deg: 30
+    min_ema_angle_deg: 2
     max_ema_angle_deg: 95
     pullback_candles_min: 1
-    pullback_candles_max: 3
+    pullback_candles_max: 20
     breakout_window_bars: 20
     rr_ratio: 2.0
 
 # Shared config (not strategy-specific)
 risk:
-  initial_risk_pct: 1.5    # % of account risked per trade in Phase 1 (0–+4%)
+  initial_risk_pct: 0.5    # % of account risked per trade in Phase 1 (0–+4%)
   reduced_risk_pct: 0.75   # % of account risked per trade in Phase 2 (>+4%)
   phase_threshold_pct: 4.0 # Account growth level that triggers phase switch
   daily_circuit_breaker_pct: 4.5  # Halt trading after 4.5% daily drawdown
-  max_concurrent_positions: 1     # Gold — one position at a time
+  max_concurrent_positions: 3     # Allow all 3 strategies to hold concurrent positions
 
 exit:
   strategy: hybrid_50_50          # Close 50% at TP; trail the remainder

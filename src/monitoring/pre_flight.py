@@ -61,6 +61,10 @@ class PreFlightResult:
         True when all tiers were exhausted and still zero signals found.
     message:
         Human-readable summary of the diagnostic outcome.
+    relaxed_config:
+        Snapshot of the relaxed parameter values when auto-relaxation was
+        applied and signals were found.  ``None`` when no relaxation was
+        needed or when the diagnostic aborted.
     """
 
     passed: bool
@@ -71,6 +75,7 @@ class PreFlightResult:
     funnel_report: dict
     aborted: bool
     message: str
+    relaxed_config: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +199,7 @@ class PreFlightDiagnostic:
         logger.warning(
             "PreFlightDiagnostic: zero signals in initial scan — starting auto-relaxation."
         )
-        relaxed_signals, final_tier, aborted = self._auto_relax_loop(sample, tracker)
+        relaxed_signals, final_tier, aborted, relaxed_cfg = self._auto_relax_loop(sample, tracker)
         funnel = tracker.get_funnel_report()
 
         if not aborted and relaxed_signals > 0:
@@ -212,6 +217,7 @@ class PreFlightDiagnostic:
                 funnel_report=funnel,
                 aborted=False,
                 message=msg,
+                relaxed_config=relaxed_cfg,
             )
 
         # All tiers exhausted — abort
@@ -316,7 +322,7 @@ class PreFlightDiagnostic:
         self,
         sample: pd.DataFrame,
         tracker: SignalFunnelTracker,
-    ) -> tuple[int, int, bool]:
+    ) -> tuple[int, int, bool, Optional[dict]]:
         """Relax one tier at a time and re-scan until signals appear.
 
         Parameters
@@ -328,13 +334,15 @@ class PreFlightDiagnostic:
 
         Returns
         -------
-        tuple[int, int, bool]
-            ``(signals_found, final_tier, aborted)``
+        tuple[int, int, bool, Optional[dict]]
+            ``(signals_found, final_tier, aborted, relaxed_config)``
 
             - ``signals_found``: count of signals after the last scan
             - ``final_tier``: relaxation tier reached (from
               ``relaxer.get_state().current_tier``)
             - ``aborted``: ``True`` if budget was exhausted with zero signals
+            - ``relaxed_config``: snapshot of relaxed parameters, or ``None``
+              if aborted
         """
         relaxer = AdaptiveRelaxer(self._edge_manager, self._config)
 
@@ -355,7 +363,7 @@ class PreFlightDiagnostic:
             )
 
             if signals > 0:
-                return signals, state.current_tier, False
+                return signals, state.current_tier, False, relaxer.capture_current_config()
 
         state = relaxer.get_state()
-        return 0, state.current_tier, True
+        return 0, state.current_tier, True, None

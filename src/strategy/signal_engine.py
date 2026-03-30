@@ -359,11 +359,13 @@ class SignalEngine:
                 f"15M price not {expected} cloud (position={state_15m.cloud_position})"
             )
 
-        # Chikou confirmation
+        # Chikou confirmation (bonus, not required — chikou span uses
+        # forward-displaced data that is unreliable in shifted backtest context)
         if state_15m.chikou_confirmed == sign:
             reasons.append("15M Chikou confirms direction")
+        elif state_15m.chikou_confirmed == 0:
+            reasons.append("15M Chikou neutral (ignored)")
         else:
-            all_pass = False
             reasons.append(
                 f"15M Chikou not confirming {direction} (value={state_15m.chikou_confirmed})"
             )
