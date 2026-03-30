@@ -405,6 +405,32 @@ class IchimokuBacktester:
             htf_vals = self._get_htf_values(tf_data, ts)
 
             # ------------------------------------------------------------------
+            # Always update strategy state and collect signals.
+            # Strategies like Asian Breakout need every bar for range tracking.
+            # Signals are collected here; the entry section below consumes them.
+            # ------------------------------------------------------------------
+            open_price = float(row_5m.get("open", close))
+            _bar_strategy_signals: List[Signal] = []
+            for _sn, _sobj in self._active_strategies:
+                try:
+                    if _sn == "asian_breakout":
+                        _sig = _sobj.on_bar(ts, high=high, low=low, close=close)
+                    elif _sn == "ema_pullback":
+                        _sig = _sobj.on_bar(
+                            ts, open=open_price, high=high, low=low, close=close,
+                            ema_fast=float(row_5m.get("ema_fast", 0.0)),
+                            ema_mid=float(row_5m.get("ema_mid", 0.0)),
+                            ema_slow=float(row_5m.get("ema_slow", 0.0)),
+                            atr=float(row_5m.get("atr", 0.0) or 0.0),
+                        )
+                    else:
+                        _sig = None
+                    if _sig is not None:
+                        _bar_strategy_signals.append(_sig)
+                except Exception:
+                    pass
+
+            # ------------------------------------------------------------------
             # Manage open trade
             # ------------------------------------------------------------------
             if active_trade_id is not None and active_trade is not None:
@@ -514,45 +540,16 @@ class IchimokuBacktester:
             elif bar_idx >= _WARMUP_BARS:
                 can_open, reason = self.trade_manager.can_open_trade(balance, instrument)
                 if can_open:
-                    # Collect signals from all active strategies
-                    all_signals: List[Signal] = []
+                    # Use signals already collected from the state-update pass above
+                    all_signals: List[Signal] = list(_bar_strategy_signals)
                     cfg = self._config
 
-                    # Try existing Ichimoku scanner (if ichimoku is in active strategies)
+                    # Also try existing Ichimoku scanner (if ichimoku is active)
                     active_names = [n for n, _ in self._active_strategies]
                     if "ichimoku" in active_names or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]):
                         ichi_signal = self._scan_for_signal(tf_data, bar_idx, instrument)
                         if ichi_signal is not None:
                             all_signals.append(ichi_signal)
-
-                    # Try other strategies
-                    for strat_name, strategy_obj in self._active_strategies:
-                        try:
-                            if strat_name == "asian_breakout":
-                                sig = strategy_obj.on_bar(
-                                    ts,
-                                    high=high,
-                                    low=low,
-                                    close=close,
-                                )
-                            elif strat_name == "ema_pullback":
-                                sig = strategy_obj.on_bar(
-                                    ts,
-                                    open=float(row_5m.get("open", close)),
-                                    high=high,
-                                    low=low,
-                                    close=close,
-                                    ema_fast=float(row_5m.get("ema_fast", 0.0)),
-                                    ema_mid=float(row_5m.get("ema_mid", 0.0)),
-                                    ema_slow=float(row_5m.get("ema_slow", 0.0)),
-                                    atr=float(row_5m.get("atr", 0.0) or 0.0),
-                                )
-                            else:
-                                sig = None
-                            if sig is not None:
-                                all_signals.append(sig)
-                        except Exception:
-                            pass  # Strategy failed on this bar, skip
 
                     # Pick best signal
                     signal = self._signal_blender.select(all_signals) if all_signals else None
