@@ -368,9 +368,15 @@ class IchimokuBacktester:
             })
 
         # 2.5. Pre-flight health check
-        pre_flight_result = self.health_monitor.pre_flight(candles_1m)
-        if pre_flight_result.aborted:
-            logger.error("Pre-flight ABORTED: %s", pre_flight_result.message)
+        # Pre-flight only scans Ichimoku signals. When other strategies are active,
+        # don't let a failed pre-flight halt the entire backtest.
+        has_non_ichimoku = len(self._active_strategies) > 0
+        if has_non_ichimoku:
+            logger.info("Skipping Ichimoku-only pre-flight — non-Ichimoku strategies are active.")
+        else:
+            pre_flight_result = self.health_monitor.pre_flight(candles_1m)
+            if pre_flight_result.aborted:
+                logger.error("Pre-flight ABORTED: %s", pre_flight_result.message)
 
         # 3. Main event loop over 5M bars
         for bar_idx, (ts_raw, row_5m) in enumerate(df_5m.iterrows()):

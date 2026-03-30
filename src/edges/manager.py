@@ -106,6 +106,10 @@ class EdgeManager:
             if not isinstance(cfg, dict):
                 cfg = {}
 
+            # When no config provided for this edge, default to disabled
+            if not cfg:
+                cfg = {"enabled": False}
+
             edge = cls(cfg)  # type: ignore[call-arg]
             self._all_edges[key] = edge
 

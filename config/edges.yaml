@@ -5,7 +5,7 @@
 
 # 1. Time-of-day filter
 time_of_day:
-  enabled: true
+  enabled: false
   params:
     start_utc: "06:00"
     end_utc: "21:00"
