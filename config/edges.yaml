@@ -90,3 +90,8 @@ equity_curve:
   params:
     lookback_trades: 20        # Rolling window of closed trades
     reduced_size_multiplier: 0.5
+
+# Trading costs — deducted from P&L per trade (round-turn)
+trading_costs:
+  commission_per_lot: 4.00     # USD per standard lot, round-turn (The5ers High Stakes)
+  spread_points: 0.15          # USD per oz price penalty (15 MT5 points, conservative)
