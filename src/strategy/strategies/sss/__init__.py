@@ -16,6 +16,7 @@ from .breathing_room import BreathingRoomDetector, SwingPoint
 from .cbc_detector import CBCDetector, CBCSignal, CBCType
 from .fifty_tap import FiftyTapCalculator, FiftyTapLevel
 from .sequence_exit import SequenceExitMode
+from .sequence_tracker import SequenceTracker, SequenceEvent
 
 __all__ = [
     "BreathingRoomDetector",
@@ -26,4 +27,6 @@ __all__ = [
     "FiftyTapCalculator",
     "FiftyTapLevel",
     "SequenceExitMode",
+    "SequenceTracker",
+    "SequenceEvent",
 ]
