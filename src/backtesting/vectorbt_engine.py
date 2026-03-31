@@ -147,6 +147,11 @@ class IchimokuBacktester:
         self._initial_balance = initial_balance
         self._point_value = point_value
 
+        # Trading costs (default to 0.0 = no cost deduction for backward compat)
+        costs = cfg.get("edges", {}).get("trading_costs", {})
+        self._commission_per_lot = float(costs.get("commission_per_lot", 0.0))
+        self._spread_points = float(costs.get("spread_points", 0.0))
+
         # Strategy components
         self.signal_engine = SignalEngine(config=cfg)
         self.edge_manager = EdgeManager(edge_configs=cfg.get("edges", {}))
