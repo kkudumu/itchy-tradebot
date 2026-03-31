@@ -806,3 +806,48 @@ class TestEdgeCases:
         """Long trade risk = entry - stop."""
         trade = _make_long_trade(entry=2000.0, stop=1992.0)
         assert trade.initial_risk == pytest.approx(8.0)
+
+
+# ============================================================
+# AdaptivePositionSizer — stop_distance_override
+# ============================================================
+
+class TestAdaptivePositionSizerStopDistanceOverride:
+
+    def test_stop_distance_override_used_when_provided(self):
+        """When stop_distance_override is given, sizer ignores atr * multiplier."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        pos = sizer.calculate_position_size(
+            account_equity=10_000.0,
+            atr=2.0,
+            atr_multiplier=1.5,
+            point_value=100.0,
+            stop_distance_override=5.0,
+        )
+        assert pos.lot_size == pytest.approx(0.3, rel=1e-3)
+        assert pos.stop_distance == pytest.approx(5.0)
+
+    def test_stop_distance_override_none_falls_back_to_atr(self):
+        """When override is None, existing atr * multiplier logic is used."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        pos = sizer.calculate_position_size(
+            account_equity=10_000.0,
+            atr=2.0,
+            atr_multiplier=1.5,
+            point_value=100.0,
+            stop_distance_override=None,
+        )
+        assert pos.lot_size == pytest.approx(0.5, rel=1e-3)
+        assert pos.stop_distance == pytest.approx(3.0)
+
+    def test_stop_distance_override_zero_raises(self):
+        """Zero stop_distance_override should raise ValueError."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        with pytest.raises(ValueError):
+            sizer.calculate_position_size(
+                account_equity=10_000.0,
+                atr=2.0,
+                atr_multiplier=1.5,
+                point_value=100.0,
+                stop_distance_override=0.0,
+            )

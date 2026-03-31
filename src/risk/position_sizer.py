@@ -115,13 +115,15 @@ class AdaptivePositionSizer:
         atr_multiplier: float,
         point_value: float,
         instrument: str = "XAUUSD",
+        stop_distance_override: float | None = None,
     ) -> PositionSize:
         """Calculate lot size from ATR-based stop distance.
 
         Formula
         -------
         risk_amount    = account_equity * (risk_pct / 100)
-        stop_distance  = atr * atr_multiplier          # price units
+        stop_distance  = stop_distance_override  (if provided)
+                         or atr * atr_multiplier  (default)
         lot_size       = risk_amount / (stop_distance * point_value)
 
         The result is clamped to [min_lot, max_lot].
@@ -139,6 +141,10 @@ class AdaptivePositionSizer:
             For XAUUSD: typically 1.0 USD per 0.01 lot per point.
         instrument:
             Instrument symbol (reserved for future per-instrument overrides).
+        stop_distance_override:
+            When provided and positive, this value is used directly as the
+            stop distance instead of ``atr * atr_multiplier``. Must be > 0.
+            Raises ValueError if 0 or negative. Pass None to use ATR logic.
 
         Returns
         -------
@@ -146,10 +152,16 @@ class AdaptivePositionSizer:
         """
         if account_equity <= 0:
             raise ValueError(f"account_equity must be positive, got {account_equity}")
-        if atr <= 0:
-            raise ValueError(f"atr must be positive, got {atr}")
-        if atr_multiplier <= 0:
-            raise ValueError(f"atr_multiplier must be positive, got {atr_multiplier}")
+        if stop_distance_override is not None:
+            if stop_distance_override <= 0:
+                raise ValueError(
+                    f"stop_distance_override must be positive, got {stop_distance_override}"
+                )
+        else:
+            if atr <= 0:
+                raise ValueError(f"atr must be positive, got {atr}")
+            if atr_multiplier <= 0:
+                raise ValueError(f"atr_multiplier must be positive, got {atr_multiplier}")
         if point_value <= 0:
             raise ValueError(f"point_value must be positive, got {point_value}")
 
@@ -158,7 +170,9 @@ class AdaptivePositionSizer:
         risk_pct = min(risk_pct, self._MAX_RISK_PCT)
 
         risk_amount = account_equity * (risk_pct / 100.0)
-        stop_distance = atr * atr_multiplier
+        stop_distance = (
+            stop_distance_override if stop_distance_override is not None else atr * atr_multiplier
+        )
 
         raw_lot = risk_amount / (stop_distance * point_value)
 
