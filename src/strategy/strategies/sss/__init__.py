@@ -9,11 +9,13 @@ CBCSignal             : dataclass for CBC detection results
 CBCType               : CBC pattern type constants
 FiftyTapCalculator    : 50% retracement entry confirmation
 FiftyTapLevel         : dataclass for 50% tap levels
+SequenceExitMode      : breathing room trailing exit for SSS trades
 """
 
 from .breathing_room import BreathingRoomDetector, SwingPoint
 from .cbc_detector import CBCDetector, CBCSignal, CBCType
 from .fifty_tap import FiftyTapCalculator, FiftyTapLevel
+from .sequence_exit import SequenceExitMode
 
 __all__ = [
     "BreathingRoomDetector",
@@ -23,4 +25,5 @@ __all__ = [
     "CBCType",
     "FiftyTapCalculator",
     "FiftyTapLevel",
+    "SequenceExitMode",
 ]
