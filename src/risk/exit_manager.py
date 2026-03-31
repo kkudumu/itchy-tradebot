@@ -11,6 +11,9 @@ Trailing rules:
 - Higher-TF Kijun trail activates at 3R+ to give room on extended moves.
 
 All R-multiple thresholds are HARD-CODED — the learning loop cannot override them.
+
+Note: SSS trades use SequenceExitMode instead of HybridExitManager.
+      See src/strategy/strategies/sss/sequence_exit.py for the SSS exit logic.
 """
 
 from __future__ import annotations
