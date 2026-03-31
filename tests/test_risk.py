@@ -806,3 +806,87 @@ class TestEdgeCases:
         """Long trade risk = entry - stop."""
         trade = _make_long_trade(entry=2000.0, stop=1992.0)
         assert trade.initial_risk == pytest.approx(8.0)
+
+
+# ============================================================
+# AdaptivePositionSizer — stop_distance_override
+# ============================================================
+
+class TestAdaptivePositionSizerStopDistanceOverride:
+
+    def test_stop_distance_override_used_when_provided(self):
+        """When stop_distance_override is given, sizer ignores atr * multiplier."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        pos = sizer.calculate_position_size(
+            account_equity=10_000.0,
+            atr=2.0,
+            atr_multiplier=1.5,
+            point_value=100.0,
+            stop_distance_override=5.0,
+        )
+        assert pos.lot_size == pytest.approx(0.3, rel=1e-3)
+        assert pos.stop_distance == pytest.approx(5.0)
+
+    def test_stop_distance_override_none_falls_back_to_atr(self):
+        """When override is None, existing atr * multiplier logic is used."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        pos = sizer.calculate_position_size(
+            account_equity=10_000.0,
+            atr=2.0,
+            atr_multiplier=1.5,
+            point_value=100.0,
+            stop_distance_override=None,
+        )
+        assert pos.lot_size == pytest.approx(0.5, rel=1e-3)
+        assert pos.stop_distance == pytest.approx(3.0)
+
+    def test_stop_distance_override_zero_raises(self):
+        """Zero stop_distance_override should raise ValueError."""
+        sizer = AdaptivePositionSizer(initial_balance=10_000.0)
+        with pytest.raises(ValueError):
+            sizer.calculate_position_size(
+                account_equity=10_000.0,
+                atr=2.0,
+                atr_multiplier=1.5,
+                point_value=100.0,
+                stop_distance_override=0.0,
+            )
+
+
+# ============================================================
+# TradeManager — actual stop distance
+# ============================================================
+
+class TestTradeManagerStopDistance:
+
+    def test_open_trade_uses_actual_stop_distance(self):
+        """open_trade should size using abs(entry - stop), not atr * multiplier."""
+        tm = _make_trade_manager(balance=10_000.0)
+        _id, _trade, pos = tm.open_trade(
+            entry_price=2000.0,
+            stop_loss=1990.0,
+            take_profit=2020.0,
+            direction="long",
+            atr=5.0,
+            point_value=1.0,
+            account_equity=10_000.0,
+            atr_multiplier=1.5,
+        )
+        assert pos.stop_distance == pytest.approx(10.0)
+        assert pos.lot_size == pytest.approx(10.0)  # 150/(10*1.0)=15→clamped to max 10.0
+
+    def test_open_trade_short_uses_actual_stop_distance(self):
+        """Short trade: stop above entry, sizer uses abs(entry - stop)."""
+        tm = _make_trade_manager(balance=10_000.0)
+        _id, _trade, pos = tm.open_trade(
+            entry_price=2000.0,
+            stop_loss=2005.0,
+            take_profit=1990.0,
+            direction="short",
+            atr=3.0,
+            point_value=100.0,
+            account_equity=10_000.0,
+            atr_multiplier=1.5,
+        )
+        assert pos.stop_distance == pytest.approx(5.0)
+        assert pos.lot_size == pytest.approx(0.3, rel=1e-2)
