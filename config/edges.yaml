@@ -95,3 +95,22 @@ equity_curve:
 trading_costs:
   commission_per_lot: 4.00     # USD per standard lot, round-turn (The5ers High Stakes)
   spread_points: 0.15          # USD per oz price penalty (15 MT5 points, conservative)
+
+# Strategy-specific edge filter profiles
+# Each strategy can override the global filter settings above.
+strategy_profiles:
+  sss:
+    spread:
+      enabled: true
+      max_spread_pips: 50
+    friday_close:
+      enabled: true
+      close_hour_utc: 20
+    equity_curve:
+      enabled: true
+    circuit_breaker:
+      enabled: true
+    time_filter:
+      enabled: false
+    news_filter:
+      enabled: false
