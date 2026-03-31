@@ -442,6 +442,7 @@ class IchimokuBacktester:
                     else:
                         _sig = None
                     if _sig is not None:
+                        _sig.strategy_name = _sn
                         _bar_strategy_signals.append(_sig)
                         _pipeline_counts["signals_generated"] += 1
                 except Exception:
@@ -1002,10 +1003,15 @@ class IchimokuBacktester:
             "pnl": float(trade_summary.get("pnl_points", 0)) * float(trade_summary.get("lot_size", 0)) * 100.0,
             "stop_loss": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "take_profit": float(trade_summary.get("take_profit", 0)),
-            "reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+            "exit_reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
             "confluence_score": int(trade_summary.get("confluence_score", 0)),
             "signal_tier": trade_summary.get("signal_tier", ""),
             "session": trade_summary.get("session", ""),
+            "lot_size": float(trade_summary.get("lot_size", 0)),
+            "risk_pct": float(trade_summary.get("risk_pct", 0)),
+            "instrument": trade_summary.get("instrument", "XAUUSD"),
+            "entry_reason": trade_summary.get("entry_reason", ""),
+            "strategy_name": trade_summary.get("strategy_name", "ichimoku"),
         })
 
     # ------------------------------------------------------------------
@@ -1233,6 +1239,18 @@ class IchimokuBacktester:
             summary["signal_tier"] = signal.quality_tier
             summary["risk_pct"] = self.trade_manager._sizer.get_risk_pct()
             summary["take_profit"] = signal.take_profit
+            summary["strategy_name"] = getattr(signal, "strategy_name", "ichimoku")
+            # Build concise entry reason from signal reasoning trace
+            reasoning = signal.reasoning or {}
+            reason_parts = []
+            for key in ("4h_filter", "1h_confirmation", "15m_signal", "5m_entry"):
+                step = reasoning.get(key)
+                if step and step.get("pass"):
+                    reason_parts.append(step.get("reason", key.replace("_", " ")))
+            if reason_parts:
+                summary["entry_reason"] = " | ".join(reason_parts)
+            else:
+                summary["entry_reason"] = f"{signal.quality_tier} signal (score {signal.confluence_score})"
 
         # Generate and attach embedding
         trade_result = {"r_multiple": summary.get("r_multiple")}

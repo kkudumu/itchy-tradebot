@@ -74,6 +74,7 @@ class Signal:
     reasoning: dict = field(default_factory=dict)
     mtf_state: Optional[MTFState] = None
     zone_context: dict = field(default_factory=dict)
+    strategy_name: str = "ichimoku"
 
 
 @dataclass
