@@ -154,12 +154,14 @@ class TradeManager:
         if not can_open:
             raise RuntimeError(f"Cannot open trade: {reason}")
 
+        actual_stop_distance = abs(entry_price - stop_loss)
         pos = self._sizer.calculate_position_size(
             account_equity=account_equity,
             atr=atr,
             atr_multiplier=atr_multiplier,
             point_value=point_value,
             instrument=instrument,
+            stop_distance_override=actual_stop_distance,
         )
 
         trade = ActiveTrade(
