@@ -9,27 +9,12 @@ trade is skipped (never widened).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import datetime
 from typing import List, Optional
 
 from src.risk.exit_manager import ActiveTrade, ExitDecision
+from .breathing_room import SwingPoint
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class SwingPoint:
-    """Confirmed swing high or low (breathing room boundary).
-
-    Canonical definition lives in breathing_room.py once that module merges.
-    """
-
-    index: int
-    timestamp: datetime
-    price: float
-    swing_type: str          # 'high' or 'low'
-    bar_count_since_prev: int
 
 
 class SequenceExitMode:
