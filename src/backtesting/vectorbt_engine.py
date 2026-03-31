@@ -1182,16 +1182,19 @@ class IchimokuBacktester:
     def _update_balance_from_trade(
         self, balance: float, trade_summary: dict
     ) -> float:
-        """Apply trade P&L to the running balance."""
+        """Apply trade P&L (minus trading costs) to the running balance."""
         pnl_points = float(trade_summary.get("pnl_points") or 0.0)
         lot_size = float(trade_summary.get("lot_size") or 0.0)
         remaining_pct = float(trade_summary.get("remaining_pct") or 1.0)
 
-        # Monetary P&L = points × lot_size × point_value × remaining fraction
-        # (the 50% partial has already been credited during the partial exit bar)
-        # For full exits the remaining_pct tells us what fraction closed here.
+        # Gross P&L = points * lot_size * point_value * remaining fraction
         monetary_pnl = pnl_points * lot_size * self._point_value * remaining_pct
-        new_balance = balance + monetary_pnl
+
+        # Trading costs (spread + commission), proportional to fraction closed
+        spread_cost = self._spread_points * lot_size * self._point_value * remaining_pct
+        commission_cost = self._commission_per_lot * lot_size * remaining_pct
+
+        new_balance = balance + monetary_pnl - spread_cost - commission_cost
 
         # Prevent balance from going negative (margin call equivalent)
         new_balance = max(new_balance, 0.01)
@@ -1203,12 +1206,15 @@ class IchimokuBacktester:
     def _partial_pnl(
         self, trade: ActiveTrade, exit_price: float, close_pct: float
     ) -> float:
-        """Calculate monetary P&L for a partial exit."""
+        """Calculate monetary P&L for a partial exit, net of trading costs."""
         if trade.direction == "long":
             pnl_points = exit_price - trade.entry_price
         else:
             pnl_points = trade.entry_price - exit_price
-        return pnl_points * trade.lot_size * self._point_value * close_pct
+        gross_pnl = pnl_points * trade.lot_size * self._point_value * close_pct
+        spread_cost = self._spread_points * trade.lot_size * self._point_value * close_pct
+        commission_cost = self._commission_per_lot * trade.lot_size * close_pct
+        return gross_pnl - spread_cost - commission_cost
 
     def _enrich_trade_summary(
         self,
