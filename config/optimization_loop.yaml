@@ -17,3 +17,11 @@ claude:
 
 validation:
   run_full_dataset: true
+
+strategies:
+  sss:
+    n_trials: 300
+    search_space: conservative   # 7 params, ~2000 combinations
+    walk_forward:
+      in_sample_months: 12
+      out_of_sample_months: 3

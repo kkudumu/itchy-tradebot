@@ -33,6 +33,10 @@ import pandas as pd
 
 from src.optimization.objectives import MultiObjective, PropFirmObjective
 
+# Register SSS parameter space in STRATEGY_REGISTRY so that
+# OptunaOptimizer(strategy_key='sss') resolves suggest_params correctly.
+import src.strategy.strategies.sss.optuna_params  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 # Silence Optuna's verbose per-trial logging by default.
