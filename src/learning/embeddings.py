@@ -150,3 +150,30 @@ class EmbeddingEngine:
                 f"Expected {FeatureVectorBuilder.VECTOR_DIM} values, got {len(values)}"
             )
         return arr
+
+
+# ---------------------------------------------------------------------------
+# SSS convenience function
+# ---------------------------------------------------------------------------
+
+def create_sss_embedding(context: Dict[str, Any]) -> np.ndarray:
+    """Create a 64-dim embedding for an SSS trade setup context.
+
+    Uses :class:`SSSSequenceMLLayer` feature extraction so that SSS-specific
+    keys (sequence_state, layer, f2_count_recent, etc.) are mapped correctly,
+    keeping them separate from the Ichimoku feature layout.
+
+    Parameters
+    ----------
+    context:
+        SSS trade setup dictionary.
+
+    Returns
+    -------
+    np.ndarray of shape (64,), dtype float64, values in [0, 1].
+    """
+    # Lazy import to avoid circular dependency at module load time.
+    from src.strategy.strategies.sss.ml_sequence import SSSSequenceMLLayer  # noqa: PLC0415
+
+    layer = SSSSequenceMLLayer(similarity_store=None)
+    return layer.create_features(context)
