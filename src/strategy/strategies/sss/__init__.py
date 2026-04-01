@@ -15,6 +15,7 @@ CBCType               : CBC pattern type constants
 FiftyTapCalculator    : 50% retracement entry confirmation
 FiftyTapLevel         : dataclass for 50% tap levels
 SequenceExitMode      : breathing room trailing exit for SSS trades
+SSSSequenceMLLayer    : ML-enhanced sequence detection (story layer)
 """
 
 from .strategy import SSSStrategy
@@ -24,6 +25,7 @@ from .ss_level_manager import SSLevelManager, SSLevel
 from .cbc_detector import CBCDetector, CBCSignal, CBCType
 from .fifty_tap import FiftyTapCalculator, FiftyTapLevel
 from .sequence_exit import SequenceExitMode
+from .ml_sequence import SSSSequenceMLLayer
 
 __all__ = [
     "SSSStrategy",
@@ -39,4 +41,5 @@ __all__ = [
     "FiftyTapCalculator",
     "FiftyTapLevel",
     "SequenceExitMode",
+    "SSSSequenceMLLayer",
 ]
