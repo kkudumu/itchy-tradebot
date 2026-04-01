@@ -52,6 +52,28 @@ strategies:
     breakout_window_bars: 20
     rr_ratio: 2.0
 
+  sss:
+    enabled: true
+    weight: 1.0
+    swing_lookback_n: 3
+    min_swing_pips: 1.0
+    ss_candle_min: 10
+    iss_candle_min: 4
+    iss_candle_max: 8
+    max_bars_in_state: 50
+    max_active_levels: 50
+    require_cbc_context: true
+    fifty_tap_level: 0.5
+    fifty_tap_tolerance_pips: 0.5
+    entry_mode: "combined"      # cbc_only, fifty_tap, combined
+    min_confluence_score: 4
+    tier_a_plus: 7
+    tier_b: 5
+    warmup_bars: 100
+    spread_multiplier: 2.0
+    min_stop_pips: 10.0
+    rr_ratio: 2.0
+
 # Shared config (not strategy-specific)
 risk:
   initial_risk_pct: 0.5    # % of account risked per trade in Phase 1 (0–+4%)
@@ -59,6 +81,8 @@ risk:
   phase_threshold_pct: 4.0 # Account growth level that triggers phase switch
   daily_circuit_breaker_pct: 4.5  # Halt trading after 4.5% daily drawdown
   max_concurrent_positions: 3     # Allow all 3 strategies to hold concurrent positions
+  max_lot_size: 1.0               # Hard cap on lot size per trade
+  min_stop_spread_multiplier: 2.0 # Minimum stop distance = spread * this value
 
 exit:
   strategy: hybrid_50_50          # Close 50% at TP; trail the remainder
@@ -91,3 +115,4 @@ active_strategies:
   - ichimoku
   - asian_breakout
   - ema_pullback
+  - sss

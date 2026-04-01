@@ -242,6 +242,7 @@ class IchimokuBacktester:
         # Multi-strategy support
         from src.strategy.strategies.asian_breakout import AsianBreakoutStrategy
         from src.strategy.strategies.ema_pullback import EMAPullbackStrategy
+        from src.strategy.strategies.sss.strategy import SSSStrategy
         from src.strategy.signal_blender import SignalBlender
 
         active_strategy_names = cfg.get("active_strategies", ["ichimoku"])
@@ -257,6 +258,17 @@ class IchimokuBacktester:
             elif name == "ema_pullback":
                 ep_config = strategy_configs.get("ema_pullback", {})
                 self._active_strategies.append(("ema_pullback", EMAPullbackStrategy(config=ep_config)))
+            elif name == "sss":
+                sss_config = strategy_configs.get("sss", {})
+                self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
+
+        # SSS exit manager (SequenceExitMode) — used for SSS trades only
+        sss_strategy_cfg = strategy_configs.get("sss", {}) if isinstance(strategy_configs, dict) else {}
+        from src.strategy.strategies.sss.sequence_exit import SequenceExitMode as _SequenceExitMode
+        self._sss_exit_manager = _SequenceExitMode(
+            spread_multiplier=float(sss_strategy_cfg.get("spread_multiplier", 2.0)),
+            min_stop_pips=float(sss_strategy_cfg.get("min_stop_pips", 10.0)),
+        )
 
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
 
@@ -439,6 +451,12 @@ class IchimokuBacktester:
                             ema_slow=float(row_5m.get("ema_slow", 0.0)),
                             atr=float(row_5m.get("atr", 0.0) or 0.0),
                         )
+                    elif _sn == "sss":
+                        _sig = _sobj.on_bar(
+                            ts, open=open_price, high=high, low=low, close=close,
+                            atr=float(row_5m.get("atr", 0.0) or 0.0),
+                            spread=float(row_5m.get("spread", 0.3)),
+                        )
                     else:
                         _sig = None
                     if _sig is not None:
@@ -505,20 +523,56 @@ class IchimokuBacktester:
                     candles_since_entry = 0
 
                 else:
-                    # Check stop, partial exit, and trail via HybridExitManager
-                    # Pass bar high/low for realistic intrabar SL/TP checks
-                    decision = self.trade_manager.update_trade(
-                        trade_id=active_trade_id,
-                        current_price=close,
-                        kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
-                        higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
-                        bar_high=high,
-                        bar_low=low,
+                    # Route exit to SequenceExitMode for SSS trades, HybridExitManager otherwise
+                    _is_sss_trade = (
+                        active_signal is not None
+                        and getattr(active_signal, "strategy_name", None) == "sss"
                     )
+                    if _is_sss_trade:
+                        # Find the SSSStrategy instance to get its swing history
+                        _sss_obj = next(
+                            (obj for name, obj in self._active_strategies if name == "sss"),
+                            None,
+                        )
+                        _recent_swings = (
+                            _sss_obj._swing_history if _sss_obj is not None else []
+                        )
+                        _sss_spread = float(row_5m.get("spread", 0.3))
+                        decision = self._sss_exit_manager.check_exit(
+                            trade=active_trade,
+                            current_price=close,
+                            recent_swings=_recent_swings,
+                            spread=_sss_spread,
+                            bar_high=high,
+                            bar_low=low,
+                        )
+                        # Sync stop_loss change back into trade_manager's record
+                        if decision.action == "trail_update" and decision.new_stop is not None:
+                            active_trade.stop_loss = decision.new_stop
+                    else:
+                        # Check stop, partial exit, and trail via HybridExitManager
+                        # Pass bar high/low for realistic intrabar SL/TP checks
+                        decision = self.trade_manager.update_trade(
+                            trade_id=active_trade_id,
+                            current_price=close,
+                            kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
+                            higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
+                            bar_high=high,
+                            bar_low=low,
+                        )
 
                     if decision.action == "full_exit":
-                        # Trade was archived in trade_manager; retrieve the summary
-                        trade_summary = self.trade_manager.closed_trades[-1]
+                        if _is_sss_trade:
+                            # SSS exit manager does not archive via trade_manager; close explicitly
+                            exit_price = active_trade.stop_loss if decision.new_stop is None else close
+                            trade_summary = self.trade_manager.close_trade(
+                                trade_id=active_trade_id,
+                                exit_price=exit_price,
+                                reason=decision.reason or "sss_stop",
+                            )
+                        else:
+                            # Trade was archived in trade_manager by update_trade; retrieve the summary
+                            trade_summary = self.trade_manager.closed_trades[-1]
                         trade_summary = self._enrich_trade_summary(
                             dict(trade_summary), active_signal, active_context, instrument, balance
                         )
