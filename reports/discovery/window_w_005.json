@@ -1,0 +1,106 @@
+{
+  "window_id": "w_005",
+  "window_index": 5,
+  "generated_at": "2026-04-02T15:18:46.436108+00:00",
+  "trade_count": 81,
+  "metrics": {
+    "total_trades": 81,
+    "win_rate": 0.321,
+    "avg_r_multiple": -0.006,
+    "avg_win_r": 1.5641,
+    "avg_loss_r": -0.7482,
+    "expectancy": -0.006,
+    "profit_factor": 0.9882,
+    "gross_profit_r": 40.6654,
+    "gross_loss_r": 41.1518,
+    "sharpe_ratio": -2.7443,
+    "sortino_ratio": -2.6462,
+    "calmar_ratio": -0.5256,
+    "max_drawdown_pct": 21.0572,
+    "max_daily_dd_pct": 3.1565,
+    "total_return_pct": -11.0685,
+    "avg_trade_duration": "1038 days, 7:41:34.200389",
+    "consecutive_wins_max": 6,
+    "consecutive_losses_max": 9,
+    "dd_peak_date": "2023-05-30 07:25:00+00:00",
+    "dd_trough_date": "2023-06-12 02:00:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 8893.15,
+    "pipeline_counts": {
+      "signals_generated": 954,
+      "signals_filtered_in_trade": 368,
+      "signals_filtered_no_open": 505,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 81
+    }
+  },
+  "challenge_result": {
+    "passed_phase_1": true,
+    "passed_phase_2": true,
+    "pass_rate": 1.0,
+    "phase_1_pass_count": 1,
+    "full_pass_count": 1,
+    "total_windows": 1,
+    "failure_breakdown": {}
+  },
+  "shap_findings": {
+    "ran": true,
+    "rules_count": 16
+  },
+  "regime": null,
+  "config_changes": [],
+  "hypotheses": [
+    {
+      "description": "Raise SSS min_confluence_score from 2 to 3. Confluence interacts with hour_cos (SHAP interaction 0.1140), meaning higher confluence requirements naturally filter out the marginal setups that fail during problematic time windows. The rules show that low-confluence trades taken during hours 3-21 UTC (where hour_cos<0.63) drag the win rate to 15-20%. Requiring a 3rd confluence point forces the strategy to wait for stronger alignment before entering.",
+      "config_change": {
+        "strategies": {
+          "sss": {
+            "min_confluence_score": 3
+          }
+        }
+      },
+      "expected_improvement": "Win rate from ~29.5% to ~34-36% by eliminating tier-C and weak tier-B entries that fail outside the Asian session. Trade count will drop ~20-30%, but surviving trades carry much higher edge. Net expectancy improvement ~15-20%.",
+      "confidence": "high",
+      "id": "hyp_8c87bb63",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:18:26.680952+00:00"
+    },
+    {
+      "description": "Lower reduced_risk_pct from 0.75% to 0.40% to keep Phase 2 trades firmly in the SHAP sweet spot. risk_pct is the 3rd most important feature (0.2888), and EVERY rule partition with risk_pct<0.50 outperforms baseline while EVERY partition with risk_pct>=0.50 underperforms. The Phase 2 switch from 0.5% to 0.75% risk INCREASES risk after building a cushion \u00e2\u20ac\u201d but the SHAP data says the strategy edge degrades at higher risk levels, likely because larger position sizes hit worse fills on gold's wide spreads during volatile sessions and trigger wider stops more frequently.",
+      "config_change": {
+        "risk": {
+          "initial_risk_pct": 0.35,
+          "reduced_risk_pct": 0.4
+        }
+      },
+      "expected_improvement": "Phase 2 trades should recover from ~21-24% WR back toward ~35%+ by staying in the low-risk regime. Smaller lot sizes mean less slippage on gold. Prop firm pass rate improves via lower drawdown variance \u00e2\u20ac\u201d Monte Carlo median max-DD should drop 25-30%, buying more runway for the strategy to compound.",
+      "confidence": "medium",
+      "id": "hyp_d4b7747d",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:18:26.682256+00:00"
+    },
+    {
+      "description": "Add a directional time filter: block LONG entries during hours 3-9 UTC (hour_sin>=0.75 zone). The deadliest regime in the data is longs during non-Asian hours \u00e2\u20ac\u201d hour_cos<0.63 AND direction>=0.50 yields only 15.4% WR (0.52x), and hour_sin>=0.75 AND direction>=0.50 yields 18.5% (0.63x). Gold tends to sell off during late-Asian/early-London as Asian physical demand fades and London dealers mark down \u00e2\u20ac\u201d SSS short setups capture this flow, but longs during this window fight the dominant order flow. This requires a new config parameter (sss.block_long_hours_utc) and a small code addition to the entry filter.",
+      "config_change": {
+        "strategies": {
+          "sss": {
+            "block_long_hours_utc_start": 3,
+            "block_long_hours_utc_end": 9
+          }
+        }
+      },
+      "expected_improvement": "Eliminates the ~54 long trades in the 3-9 UTC window that had 18.5% WR, redirecting capital to the 40% WR regime (hour_sin<0.75 + low risk). Expected portfolio WR lift from 29.5% to ~33-35%. Combined with Hypothesis 1, the surviving trades should average 38-40% WR \u00e2\u20ac\u201d enough to shift the strategy from marginally profitable to clearly positive expectancy at 2R reward.",
+      "confidence": "medium",
+      "id": "hyp_adb8a427",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:18:26.683448+00:00"
+    }
+  ],
+  "pattern_analysis": {},
+  "codegen_results": []
+}

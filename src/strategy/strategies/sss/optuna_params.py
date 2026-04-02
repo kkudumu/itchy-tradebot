@@ -67,6 +67,7 @@ class SSSOptunaAdapter:
         min_confluence_score: int [2, 6]   — minimum confluence points to trade
         """
         return {
+            "active_strategies": ["sss"],
             "strategies": {
                 "sss": {
                     "swing_lookback_n": trial.suggest_int(
@@ -85,10 +86,10 @@ class SSSOptunaAdapter:
                         "sss_iss_candle_max", 6, 8
                     ),
                     "entry_mode": trial.suggest_categorical(
-                        "sss_entry_mode", ["cbc_only", "fifty_tap", "combined"]
+                        "sss_entry_mode", ["cbc_only"]
                     ),
                     "min_confluence_score": trial.suggest_int(
-                        "sss_min_confluence_score", 2, 6
+                        "sss_min_confluence_score", 1, 4
                     ),
                 }
             }

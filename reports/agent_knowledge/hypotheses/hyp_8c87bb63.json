@@ -1,0 +1,16 @@
+{
+  "description": "Raise SSS min_confluence_score from 2 to 3. Confluence interacts with hour_cos (SHAP interaction 0.1140), meaning higher confluence requirements naturally filter out the marginal setups that fail during problematic time windows. The rules show that low-confluence trades taken during hours 3-21 UTC (where hour_cos<0.63) drag the win rate to 15-20%. Requiring a 3rd confluence point forces the strategy to wait for stronger alignment before entering.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "min_confluence_score": 3
+      }
+    }
+  },
+  "expected_improvement": "Win rate from ~29.5% to ~34-36% by eliminating tier-C and weak tier-B entries that fail outside the Asian session. Trade count will drop ~20-30%, but surviving trades carry much higher edge. Net expectancy improvement ~15-20%.",
+  "confidence": "high",
+  "id": "hyp_8c87bb63",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:18:26.680952+00:00"
+}

@@ -1,0 +1,22 @@
+{
+  "description": "Enable time-of-day filter to cut Asian/off-hours trades. hour_cos is the 2nd most important feature (0.7311 SHAP) and its interaction with direction (0.1227) is the strongest pairwise signal. Decoding: hour_cos >= 0.63 maps to ~20:30-03:30 UTC (Asian/late-NY), where the weak filter shows shorts hit only 11.1% win rate (0.67x baseline). The time_of_day edge filter exists but is currently DISABLED for SSS. Enabling it with a London-open-through-mid-NY window removes the lowest-quality time zones while preserving the sessions where gold has structural liquidity and trending behavior.",
+  "config_change": {
+    "edges": {
+      "profiles": {
+        "sss": {
+          "time_filter": {
+            "enabled": true,
+            "start_utc": "07:00",
+            "end_utc": "18:00"
+          }
+        }
+      }
+    }
+  },
+  "expected_improvement": "Removes ~25-30% of trades occurring in low-win-rate off-hours windows. Based on the weak filter evidence, these cut trades average 8-11% win rate vs 16.7% baseline. Remaining trades should see win rate lift to ~19-22%. Fewer trades but materially better expectancy.",
+  "confidence": "high",
+  "id": "hyp_1957ea67",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:14:50.282100+00:00"
+}

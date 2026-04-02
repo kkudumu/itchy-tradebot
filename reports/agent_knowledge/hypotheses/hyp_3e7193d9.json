@@ -1,0 +1,17 @@
+{
+  "description": "Avoid longs during London/NY session. The weakest filter discovered shows hour_cos < 0.63 AND direction >= 0.50 (London/NY longs) at only 8.3% win rate \u00e2\u20ac\u201d half the baseline (0.50x lift, n=12). Combined with the strong hour_cos \u00c3\u2014 direction interaction (0.1227 SHAP), this suggests a structural session-direction bias: gold tends to sell off during London/NY in this sample window, making long entries during 03:30-20:30 UTC systematically unfavorable. This can be implemented by adding a direction-aware session filter as a new edge, or as a first approximation, by narrowing the allowed trading window to the overlap where both directions work (roughly 18:00-03:30 UTC for longs, keeping London/NY open for shorts only). However, since no existing config param directly encodes direction\u00c3\u2014session, the most practical proxy is to raise the confluence bar specifically for the permissive direction.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "min_confluence_score": 4,
+        "tier_c": 4
+      }
+    }
+  },
+  "expected_improvement": "By requiring score >= 4 (at least 2 structural alignment components), we indirectly filter out the low-quality directional trades that lack multi-timeframe confirmation. The 12 long trades during London/NY with 8.3% win rate likely have low confluence. This is a blunt proxy \u00e2\u20ac\u201d a proper direction\u00c3\u2014session filter would be more surgical, but this is testable immediately with existing config. Expected to cut trade count by ~30-40% while lifting win rate by 3-5pp.",
+  "confidence": "low",
+  "id": "hyp_3e7193d9",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:14:50.284575+00:00"
+}

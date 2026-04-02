@@ -1,0 +1,115 @@
+{
+  "window_id": "w_002",
+  "window_index": 2,
+  "generated_at": "2026-04-02T15:14:50.288266+00:00",
+  "trade_count": 9,
+  "metrics": {
+    "total_trades": 9,
+    "win_rate": 0.1111,
+    "avg_r_multiple": -0.7103,
+    "avg_win_r": 0.0294,
+    "avg_loss_r": -0.8027,
+    "expectancy": -0.7103,
+    "profit_factor": 0.0046,
+    "gross_profit_r": 0.0294,
+    "gross_loss_r": 6.4219,
+    "sharpe_ratio": -5.3168,
+    "sortino_ratio": -1.7092,
+    "calmar_ratio": -1.0,
+    "max_drawdown_pct": 11.0932,
+    "max_daily_dd_pct": 3.71,
+    "total_return_pct": -11.0932,
+    "avg_trade_duration": "1134 days, 0:46:15.028611",
+    "consecutive_wins_max": 1,
+    "consecutive_losses_max": 7,
+    "dd_peak_date": "2023-02-22 00:00:00+00:00",
+    "dd_trough_date": "2023-02-27 01:55:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 8890.68,
+    "pipeline_counts": {
+      "signals_generated": 1065,
+      "signals_filtered_in_trade": 29,
+      "signals_filtered_no_open": 1025,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 9
+    }
+  },
+  "challenge_result": {
+    "passed_phase_1": false,
+    "passed_phase_2": false,
+    "pass_rate": 0.0,
+    "phase_1_pass_count": 0,
+    "full_pass_count": 0,
+    "total_windows": 1,
+    "failure_breakdown": {
+      "daily_dd": 1
+    }
+  },
+  "shap_findings": {
+    "ran": true,
+    "rules_count": 4
+  },
+  "regime": null,
+  "config_changes": [],
+  "hypotheses": [
+    {
+      "description": "Enable time-of-day filter to cut Asian/off-hours trades. hour_cos is the 2nd most important feature (0.7311 SHAP) and its interaction with direction (0.1227) is the strongest pairwise signal. Decoding: hour_cos >= 0.63 maps to ~20:30-03:30 UTC (Asian/late-NY), where the weak filter shows shorts hit only 11.1% win rate (0.67x baseline). The time_of_day edge filter exists but is currently DISABLED for SSS. Enabling it with a London-open-through-mid-NY window removes the lowest-quality time zones while preserving the sessions where gold has structural liquidity and trending behavior.",
+      "config_change": {
+        "edges": {
+          "profiles": {
+            "sss": {
+              "time_filter": {
+                "enabled": true,
+                "start_utc": "07:00",
+                "end_utc": "18:00"
+              }
+            }
+          }
+        }
+      },
+      "expected_improvement": "Removes ~25-30% of trades occurring in low-win-rate off-hours windows. Based on the weak filter evidence, these cut trades average 8-11% win rate vs 16.7% baseline. Remaining trades should see win rate lift to ~19-22%. Fewer trades but materially better expectancy.",
+      "confidence": "high",
+      "id": "hyp_1957ea67",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:14:50.282100+00:00"
+    },
+    {
+      "description": "Raise min_confluence_score from 2 to 3. confluence_score has 0.6643 mean |SHAP| \u00e2\u20ac\u201d 3rd most important predictor. The current threshold of 2 on a 0-8 scale is extremely permissive (only requires 1 of 6 confluence components beyond minimum). The SSS confluence score sums: SS alignment (+2), ISS alignment (+2), CBC confirmation (+1), fifty-tap (+1), target proximity (+1), no F2 conflict (+1). A score of 2 means essentially zero alignment beyond the entry trigger. Raising to 3 requires at least one structural alignment component (e.g., SS direction matching sequence direction), filtering out trades with no contextual support.",
+      "config_change": {
+        "strategies": {
+          "sss": {
+            "min_confluence_score": 3
+          }
+        }
+      },
+      "expected_improvement": "Filters out the bottom tier of low-conviction setups. Given confluence_score's high SHAP importance, trades with score=2 are likely dragging down overall performance. Expected win rate improvement of 2-4 percentage points on retained trades. Also reduces overtrading, which helps with prop firm daily loss limits.",
+      "confidence": "medium",
+      "id": "hyp_38f2e9e8",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:14:50.283390+00:00"
+    },
+    {
+      "description": "Avoid longs during London/NY session. The weakest filter discovered shows hour_cos < 0.63 AND direction >= 0.50 (London/NY longs) at only 8.3% win rate \u00e2\u20ac\u201d half the baseline (0.50x lift, n=12). Combined with the strong hour_cos \u00c3\u2014 direction interaction (0.1227 SHAP), this suggests a structural session-direction bias: gold tends to sell off during London/NY in this sample window, making long entries during 03:30-20:30 UTC systematically unfavorable. This can be implemented by adding a direction-aware session filter as a new edge, or as a first approximation, by narrowing the allowed trading window to the overlap where both directions work (roughly 18:00-03:30 UTC for longs, keeping London/NY open for shorts only). However, since no existing config param directly encodes direction\u00c3\u2014session, the most practical proxy is to raise the confluence bar specifically for the permissive direction.",
+      "config_change": {
+        "strategies": {
+          "sss": {
+            "min_confluence_score": 4,
+            "tier_c": 4
+          }
+        }
+      },
+      "expected_improvement": "By requiring score >= 4 (at least 2 structural alignment components), we indirectly filter out the low-quality directional trades that lack multi-timeframe confirmation. The 12 long trades during London/NY with 8.3% win rate likely have low confluence. This is a blunt proxy \u00e2\u20ac\u201d a proper direction\u00c3\u2014session filter would be more surgical, but this is testable immediately with existing config. Expected to cut trade count by ~30-40% while lifting win rate by 3-5pp.",
+      "confidence": "low",
+      "id": "hyp_3e7193d9",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:14:50.284575+00:00"
+    }
+  ],
+  "pattern_analysis": {},
+  "codegen_results": []
+}

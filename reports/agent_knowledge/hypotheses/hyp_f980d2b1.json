@@ -1,0 +1,16 @@
+{
+  "description": "Raise min_confluence_score from 2 to 3. SHAP shows confluence_score at 0.071 importance \u00e2\u20ac\u201d moderate but non-trivial. More critically, it interacts with the time features: the low-confluence trades that squeak through at score=2 are disproportionately the off-peak, low-quality entries. The current scoring (0\u00e2\u20ac\u201c8 scale, max: 2+2+1+1+1+1) means score=2 only requires SS alignment OR ISS alignment with nothing else \u00e2\u20ac\u201d that's a one-leg signal with no confirmation. Score=3 forces at least one additional confluence factor (CBC, 50% tap, target proximity, or no F2 conflict). Since signal_tier has near-zero SHAP (0.011), the tier system isn't adding much, but the raw confluence threshold is a meaningful gate.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "min_confluence_score": 3
+      }
+    }
+  },
+  "expected_improvement": "Expect to filter out ~20-30% of the weakest trades (those with only single-leg alignment and no confirming factors). Win rate should improve by +2-3pp at the cost of fewer signals. Net profit factor improvement of ~0.1-0.2. Lower confidence because the SHAP importance for confluence is moderate \u00e2\u20ac\u201d the hour filter is doing most of the heavy lifting.",
+  "confidence": "medium",
+  "id": "hyp_f980d2b1",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:21:04.014795+00:00"
+}

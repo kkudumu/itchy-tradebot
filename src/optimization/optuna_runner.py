@@ -130,6 +130,7 @@ class OptunaOptimizer:
             data=self._data,
             initial_balance=self._initial_balance,
             strategy_key=self._strategy_key,
+            base_config=self._config,
         )
 
         logger.info(
@@ -198,6 +199,7 @@ class OptunaOptimizer:
             data=self._data,
             initial_balance=self._initial_balance,
             strategy_key=self._strategy_key,
+            base_config=self._config,
         )
 
         logger.info(

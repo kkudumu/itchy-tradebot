@@ -1,0 +1,110 @@
+{
+  "window_id": "w_011",
+  "window_index": 11,
+  "generated_at": "2026-04-02T15:23:10.535323+00:00",
+  "trade_count": 46,
+  "metrics": {
+    "total_trades": 46,
+    "win_rate": 0.2609,
+    "avg_r_multiple": -0.0887,
+    "avg_win_r": 1.5418,
+    "avg_loss_r": -0.6641,
+    "expectancy": -0.0887,
+    "profit_factor": 0.8194,
+    "gross_profit_r": 18.5013,
+    "gross_loss_r": 22.5794,
+    "sharpe_ratio": -8.5219,
+    "sortino_ratio": -3.8164,
+    "calmar_ratio": -0.6426,
+    "max_drawdown_pct": 17.2477,
+    "max_daily_dd_pct": 3.4173,
+    "total_return_pct": -11.0831,
+    "avg_trade_duration": "882 days, 4:28:18.656899",
+    "consecutive_wins_max": 2,
+    "consecutive_losses_max": 6,
+    "dd_peak_date": "2023-10-30 09:15:00+00:00",
+    "dd_trough_date": "2023-11-07 02:10:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 8891.69,
+    "pipeline_counts": {
+      "signals_generated": 1229,
+      "signals_filtered_in_trade": 183,
+      "signals_filtered_no_open": 999,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 46
+    }
+  },
+  "challenge_result": {
+    "passed_phase_1": true,
+    "passed_phase_2": false,
+    "pass_rate": 0.0,
+    "phase_1_pass_count": 1,
+    "full_pass_count": 0,
+    "total_windows": 1,
+    "failure_breakdown": {
+      "daily_dd": 1
+    }
+  },
+  "shap_findings": {
+    "ran": true,
+    "rules_count": 2
+  },
+  "regime": null,
+  "config_changes": [],
+  "hypotheses": [
+    {
+      "description": "Tighten trading window to core London/NY overlap. hour_cos is the #1 SHAP feature (0.2769) with strong interactions to direction (0.1383) and confluence_score (0.1226). The cosine encoding means the model is highly sensitive to which hours trades fire. The current window (08:00-17:00 UTC) includes late NY session where gold momentum fades. Narrowing to 08:00-14:00 UTC captures the London-NY overlap \u00e2\u20ac\u201d gold's highest-liquidity, highest-follow-through window \u00e2\u20ac\u201d while dropping the low-quality tail end where hour_cos SHAP influence is negative.",
+      "config_change": {
+        "edges": {
+          "time_of_day": {
+            "enabled": true,
+            "params": {
+              "start_utc": "08:00",
+              "end_utc": "14:00"
+            }
+          }
+        }
+      },
+      "expected_improvement": "Expect 2-4pp win rate improvement by eliminating late-session trades where gold reversal risk is highest. The session features (sess_london: 0.0241, sess_ny: 0.0223, sess_overlap: 0.0136) confirm overlap matters, but the much larger hour_cos SHAP (0.2769) suggests the specific hour within sessions is what drives outcomes. Fewer trades but higher quality \u00e2\u20ac\u201d net positive for prop firm challenge where drawdown control matters more than trade count.",
+      "confidence": "high",
+      "id": "hyp_3ef02193",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:23:10.531906+00:00"
+    },
+    {
+      "description": "Favor short-side trades via higher min_confluence for longs. The discovered rule shows direction<0.50 (shorts) at 35.7% WR vs direction>=0.50 (longs) at 25.0% \u00e2\u20ac\u201d a 10.7pp gap and 1.43x relative edge for shorts. This aligns with SSS mechanics: the strategy detects supply/demand sequences, and short-side supply zones on gold tend to be more reliable because institutional sellers place limit orders at prior swing highs. Rather than filtering out longs entirely (losing optionality), require higher confluence for long entries by raising min_confluence_score from 2 to 3. Short trades already cluster at higher confluence naturally.",
+      "config_change": {
+        "strategies": {
+          "sss": {
+            "min_confluence_score": 3
+          }
+        }
+      },
+      "expected_improvement": "Expect 2-3pp win rate improvement overall by filtering out low-conviction long setups that drag down the blended win rate. The hour_cos \u00c3\u2014 confluence_score interaction (0.1226, 4th strongest) confirms that confluence quality varies by time \u00e2\u20ac\u201d raising the bar means only the strongest long setups survive, while the naturally higher-quality short setups continue through. Should reduce trade count by ~15-20% but disproportionately cut losing longs.",
+      "confidence": "medium",
+      "id": "hyp_864cffea",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:23:10.533165+00:00"
+    },
+    {
+      "description": "Reduce Phase 1 risk from 0.5% to 0.35%. risk_pct is the 5th most important feature (0.1429) and appears in 4 of the top 10 interactions: dow_sin\u00c3\u2014risk_pct (0.1505, #1 interaction), dow_cos\u00c3\u2014risk_pct (0.1166), hour_sin\u00c3\u2014risk_pct (0.0926), direction\u00c3\u2014risk_pct (0.0660). Both discovered rules condition on risk_pct<0.50, and the winning rule (35.7% WR) requires low risk. The strong dow_sin\u00c3\u2014risk_pct interaction (0.1505) suggests that on certain days, lower risk dramatically changes outcomes \u00e2\u20ac\u201d likely because smaller position sizes avoid stop-hunting wicks on volatile days (Monday/Friday).",
+      "config_change": {
+        "risk": {
+          "initial_risk_pct": 0.35
+        }
+      },
+      "expected_improvement": "Expect the win rate to approach the 35.7% seen in the SHAP rule (up from 30.1% baseline) as we move firmly into the risk_pct<0.50 regime where the model finds better outcomes. The trade-off is smaller individual wins, but for the prop firm challenge the primary constraint is max drawdown (10%) and daily drawdown (5%) \u00e2\u20ac\u201d lower risk per trade directly reduces drawdown variance. Monte Carlo survival probability should increase significantly even if total return per trade decreases.",
+      "confidence": "medium",
+      "id": "hyp_ba3d92c7",
+      "strategy": "sss",
+      "status": "proposed",
+      "created_at": "2026-04-02T15:23:10.534200+00:00"
+    }
+  ],
+  "pattern_analysis": {},
+  "codegen_results": []
+}

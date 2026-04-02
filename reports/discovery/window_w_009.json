@@ -1,0 +1,56 @@
+{
+  "window_id": "w_009",
+  "window_index": 9,
+  "generated_at": "2026-04-02T15:21:14.367374+00:00",
+  "trade_count": 35,
+  "metrics": {
+    "total_trades": 35,
+    "win_rate": 0.3143,
+    "avg_r_multiple": -0.1052,
+    "avg_win_r": 0.9447,
+    "avg_loss_r": -0.5865,
+    "expectancy": -0.1052,
+    "profit_factor": 0.7383,
+    "gross_profit_r": 10.3919,
+    "gross_loss_r": 14.0749,
+    "sharpe_ratio": -8.3907,
+    "sortino_ratio": -3.6952,
+    "calmar_ratio": -0.7384,
+    "max_drawdown_pct": 14.9425,
+    "max_daily_dd_pct": 3.3999,
+    "total_return_pct": -11.0329,
+    "avg_trade_duration": "932 days, 8:18:14.613259",
+    "consecutive_wins_max": 2,
+    "consecutive_losses_max": 8,
+    "dd_peak_date": "2023-09-08 20:00:00+00:00",
+    "dd_trough_date": "2023-09-19 10:25:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 8896.71,
+    "pipeline_counts": {
+      "signals_generated": 933,
+      "signals_filtered_in_trade": 128,
+      "signals_filtered_no_open": 766,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 35
+    }
+  },
+  "challenge_result": {
+    "passed_phase_1": false,
+    "passed_phase_2": false,
+    "pass_rate": 0.0,
+    "phase_1_pass_count": 0,
+    "full_pass_count": 0,
+    "total_windows": 1,
+    "failure_breakdown": {
+      "daily_dd": 1
+    }
+  },
+  "shap_findings": {},
+  "regime": null,
+  "config_changes": [],
+  "hypotheses": [],
+  "pattern_analysis": {},
+  "codegen_results": []
+}

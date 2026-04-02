@@ -27,7 +27,7 @@ Thumbs.db
 
 # Data
 *.bi5
-data/raw/
+data/
 
 # FTM
 .ftm-map/

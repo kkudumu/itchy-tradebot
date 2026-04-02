@@ -1,0 +1,17 @@
+{
+  "description": "Add a directional time filter: block LONG entries during hours 3-9 UTC (hour_sin>=0.75 zone). The deadliest regime in the data is longs during non-Asian hours \u00e2\u20ac\u201d hour_cos<0.63 AND direction>=0.50 yields only 15.4% WR (0.52x), and hour_sin>=0.75 AND direction>=0.50 yields 18.5% (0.63x). Gold tends to sell off during late-Asian/early-London as Asian physical demand fades and London dealers mark down \u00e2\u20ac\u201d SSS short setups capture this flow, but longs during this window fight the dominant order flow. This requires a new config parameter (sss.block_long_hours_utc) and a small code addition to the entry filter.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "block_long_hours_utc_start": 3,
+        "block_long_hours_utc_end": 9
+      }
+    }
+  },
+  "expected_improvement": "Eliminates the ~54 long trades in the 3-9 UTC window that had 18.5% WR, redirecting capital to the 40% WR regime (hour_sin<0.75 + low risk). Expected portfolio WR lift from 29.5% to ~33-35%. Combined with Hypothesis 1, the surviving trades should average 38-40% WR \u00e2\u20ac\u201d enough to shift the strategy from marginally profitable to clearly positive expectancy at 2R reward.",
+  "confidence": "medium",
+  "id": "hyp_adb8a427",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:18:26.683448+00:00"
+}

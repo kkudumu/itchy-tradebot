@@ -300,13 +300,38 @@ def run_backtest(args: argparse.Namespace) -> int:
     try:
         from src.backtesting.vectorbt_engine import IchimokuBacktester
 
+        # Build full config dict for the backtester from raw YAML.
+        # The Pydantic model doesn't capture active_strategies or prop_firm,
+        # so we load the raw strategy YAML for those fields.
+        import yaml as _yaml
+        _raw_strat = {}
+        _strat_yaml = Path(loader.config_dir) / "strategy.yaml"
+        if _strat_yaml.exists():
+            with _strat_yaml.open() as _f:
+                _raw_strat = _yaml.safe_load(_f) or {}
+
+        bt_config = {}
+        if hasattr(app_config, "edges"):
+            bt_config["edges"] = app_config.edges.model_dump()
+        bt_config["active_strategies"] = _raw_strat.get(
+            "active_strategies", [_raw_strat.get("active_strategy", "ichimoku")]
+        )
+        bt_config["strategies"] = _raw_strat.get("strategies", {})
+        for key in ("risk", "exit", "prop_firm"):
+            if key in _raw_strat:
+                bt_config[key] = _raw_strat[key]
+
+        prop = bt_config.get("prop_firm", {})
+        p1 = prop.get("phase_1", {})
+        bt_config["prop_firm"] = prop
+
         backtester = IchimokuBacktester(
-            config={"edges": app_config.edges.model_dump()} if hasattr(app_config, "edges") else None,
+            config=bt_config,
             initial_balance=args.initial_balance,
-            prop_firm_profit_target_pct=8.0,
-            prop_firm_max_daily_dd_pct=5.0,
-            prop_firm_max_total_dd_pct=10.0,
-            prop_firm_time_limit_days=30,
+            prop_firm_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
+            prop_firm_max_daily_dd_pct=float(p1.get("daily_loss_pct", 5.0)),
+            prop_firm_max_total_dd_pct=float(p1.get("max_loss_pct", 10.0)),
+            prop_firm_time_limit_days=int(p1.get("time_limit_days", 30)),
         )
         # Wire edge manager to dashboard for runtime config access
         if live_server is not None:

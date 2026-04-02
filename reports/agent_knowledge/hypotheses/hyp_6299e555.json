@@ -1,0 +1,21 @@
+{
+  "description": "Add day-of-week exclusion for low-edge days. The hour_cos \u00c3\u2014 dow_sin interaction (0.189) is the strongest pairwise interaction in the entire SHAP matrix \u00e2\u20ac\u201d stronger than any single feature except hour_cos itself. dow_sin = sin(2\u00cf\u20ac\u00c2\u00b7dow/7) peaks mid-week (Wed/Thu) and troughs at week boundaries (Mon/Fri-Sun). Gold exhibits known behavioral patterns: Monday is range-establishing (institutional flow re-pricing from weekend gaps), Friday afternoon sees position-squaring ahead of the weekend. The interaction with hour_cos suggests that the London-NY session edge is strongest Tue-Thu and weakest Mon/Fri. Excluding or reducing exposure on Monday and Friday would align with the SHAP evidence and known gold market microstructure.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "excluded_days_utc": [
+          "Monday",
+          "Friday"
+        ],
+        "trading_start_utc": "08:00",
+        "trading_end_utc": "20:00"
+      }
+    }
+  },
+  "expected_improvement": "Stacking the day-of-week filter on top of the hour window should capture the interaction effect. The interaction SHAP (0.189) is nearly as large as dow_sin alone (0.244), meaning most of the day-of-week signal comes from its interplay with hour \u00e2\u20ac\u201d confirming that day+hour together matter more than either alone. Expect an additional +2-3pp win rate improvement on top of the hour filter, at the cost of ~40% fewer trading days (losing Mon+Fri). Net: fewer trades but higher quality.",
+  "confidence": "low",
+  "id": "hyp_6299e555",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:21:04.016115+00:00"
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "feature_a": "direction",
+    "feature_b": "risk_pct",
+    "condition": "direction<0.50 AND risk_pct<0.50",
+    "quadrant_win_rate": 0.3566,
+    "quadrant_avg_r": 0.3843,
+    "baseline_win_rate": 0.3013,
+    "n_trades": 129,
+    "lift": 1.183,
+    "interaction_strength": 0.066,
+    "recommendation": "weak_filter"
+  },
+  {
+    "feature_a": "direction",
+    "feature_b": "risk_pct",
+    "condition": "direction>=0.50 AND risk_pct<0.50",
+    "quadrant_win_rate": 0.25,
+    "quadrant_avg_r": -0.0282,
+    "baseline_win_rate": 0.3013,
+    "n_trades": 92,
+    "lift": 0.83,
+    "interaction_strength": 0.066,
+    "recommendation": "informational"
+  }
+]

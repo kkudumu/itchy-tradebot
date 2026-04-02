@@ -92,11 +92,13 @@ class PropFirmObjective:
         initial_balance: float = 10_000.0,
         strategy_key: str = 'ichimoku',
         backtester: "IchimokuBacktester" = None,
+        base_config: dict | None = None,
     ) -> None:
         self._backtester = backtester
         self._data = data
         self._initial_balance = initial_balance
         self._strategy_key = strategy_key
+        self._base_config = base_config or {}
 
     # ------------------------------------------------------------------
     # Optuna callable
@@ -130,36 +132,41 @@ class PropFirmObjective:
             return 0.0
 
         sharpe = _safe_float(metrics.get("sharpe_ratio"), 0.0)
-        if sharpe <= 0.0:
-            return 0.0
-
         max_daily_dd = _safe_float(prop.get("max_daily_dd_pct"), 0.0)
         max_total_dd = _safe_float(prop.get("max_total_dd_pct"), 0.0)
         total_return = _safe_float(metrics.get("total_return_pct"), 0.0)
         win_rate = _safe_float(metrics.get("win_rate"), 0.0)
+        expectancy = _safe_float(metrics.get("expectancy"), 0.0)
 
         # Hard failure — total DD breach disqualifies the strategy outright.
         if max_total_dd > 10.0:
             return 0.0
 
-        multiplier = 1.0
+        # Composite score: blend return, sharpe, and win rate for gradient.
+        # This gives Optuna signal even for losing strategies so it can
+        # learn which direction to optimize (unlike the old sharpe-only gate).
+        score = 0.0
 
-        # Soft penalty — daily DD approaching the 5 % limit.
+        # Return component (dominant): range roughly [-10, +10]
+        score += total_return * 0.5
+
+        # Sharpe component: reward positive sharpe
+        score += max(sharpe, -2.0) * 2.0
+
+        # Win rate bonus
+        score += (win_rate - 0.30) * 10.0  # +0 at 30%, +2 at 50%
+
+        # Trade count bonus (enough trades for significance)
+        if n_trades >= 20:
+            score += 1.0
+
+        # Drawdown penalties
         if max_daily_dd > 5.0:
-            multiplier *= 0.5
+            score *= 0.5
+        if max_total_dd > 8.0:
+            score *= 0.5
 
-        # Insufficient return penalty — scale down proportionally.
-        if total_return < 8.0:
-            if total_return <= 0.0:
-                return 0.0
-            multiplier *= total_return / 8.0
-
-        # Low win-rate penalty.
-        if win_rate < 0.45:
-            multiplier *= 0.8
-
-        score = sharpe * multiplier
-        return max(0.0, score)
+        return score
 
     # ------------------------------------------------------------------
     # Parameter space
@@ -228,28 +235,43 @@ class PropFirmObjective:
     def _run_backtest(self, params: dict):
         """Construct a fresh backtester with *params* and run it.
 
-        Tries ``StrategyBacktester`` first (strategy-agnostic path).  Falls
-        back to ``IchimokuBacktester`` when ``StrategyBacktester`` is not
-        importable (backward compatible).
+        Merges the trial's *params* on top of any *base_config* provided at
+        construction time.  This ensures that edges, risk, exit, and prop
+        firm config are preserved across optimization trials while the
+        strategy-specific search space varies per trial.
 
         Returns the ``BacktestResult`` or ``None`` on unhandled exception.
         """
         from src.backtesting.vectorbt_engine import IchimokuBacktester
 
+        # Deep-merge base config with trial params (trial wins on conflict).
+        # For strategies, merge at the per-strategy level so unoptimized
+        # params (warmup_bars, spread_multiplier, etc.) are preserved.
+        import copy
+        merged = copy.deepcopy(self._base_config)
+        for k, v in params.items():
+            if k == "strategies" and isinstance(v, dict) and "strategies" in merged:
+                for strat_name, strat_params in v.items():
+                    if strat_name in merged["strategies"] and isinstance(strat_params, dict):
+                        merged["strategies"][strat_name] = {
+                            **merged["strategies"][strat_name],
+                            **strat_params,
+                        }
+                    else:
+                        merged["strategies"][strat_name] = strat_params
+            else:
+                merged[k] = v
+
         try:
-            try:
-                from src.backtesting.vectorbt_engine import StrategyBacktester
-                backtester = StrategyBacktester(
-                    strategy_key=self._strategy_key,
-                    config=params,
-                    initial_balance=self._initial_balance,
-                )
-            except ImportError:
-                backtester = IchimokuBacktester(
-                    config=params,
-                    initial_balance=self._initial_balance,
-                )
-            return backtester.run(self._data, log_trades=False)
+            # Use IchimokuBacktester directly — it already handles all
+            # registered strategies (SSS, Asian Breakout, etc.) via its
+            # multi-strategy loop.  StrategyBacktester requires a full
+            # Strategy ABC implementation, which Optuna adapters lack.
+            backtester = IchimokuBacktester(
+                config=merged,
+                initial_balance=self._initial_balance,
+            )
+            return backtester.run(self._data, log_trades=False, enable_learning=True)
         except Exception as exc:
             logger.debug("Trial backtest failed: %s", exc)
             return None
@@ -289,6 +311,7 @@ class MultiObjective:
         initial_balance: float = 10_000.0,
         strategy_key: str = 'ichimoku',
         backtester: "IchimokuBacktester" = None,
+        base_config: dict | None = None,
     ) -> None:
         # Delegate parameter sampling and backtest execution to
         # PropFirmObjective so the parameter space stays consistent.
@@ -297,6 +320,7 @@ class MultiObjective:
             initial_balance=initial_balance,
             strategy_key=strategy_key,
             backtester=backtester,
+            base_config=base_config,
         )
 
     def __call__(self, trial: optuna.Trial) -> tuple[float, float, float]:

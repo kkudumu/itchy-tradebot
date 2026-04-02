@@ -55,21 +55,21 @@ strategies:
   sss:
     enabled: true
     weight: 1.0
-    swing_lookback_n: 3
-    min_swing_pips: 1.0
-    ss_candle_min: 10
-    iss_candle_min: 4
+    swing_lookback_n: 2
+    min_swing_pips: 0.5
+    ss_candle_min: 8
+    iss_candle_min: 3
     iss_candle_max: 8
-    max_bars_in_state: 50
+    max_bars_in_state: 100
     max_active_levels: 50
-    require_cbc_context: true
+    require_cbc_context: false
     fifty_tap_level: 0.5
     fifty_tap_tolerance_pips: 0.5
-    entry_mode: "combined"      # cbc_only, fifty_tap, combined
-    min_confluence_score: 4
+    entry_mode: "cbc_only"      # cbc_only, fifty_tap, combined
+    min_confluence_score: 2
     tier_a_plus: 7
     tier_b: 5
-    warmup_bars: 100
+    warmup_bars: 50
     spread_multiplier: 2.0
     min_stop_pips: 10.0
     rr_ratio: 2.0
@@ -112,7 +112,4 @@ prop_firm:
     daily_loss_pct: 5.0
 
 active_strategies:
-  - ichimoku
-  - asian_breakout
-  - ema_pullback
   - sss

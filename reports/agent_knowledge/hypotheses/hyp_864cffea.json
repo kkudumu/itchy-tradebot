@@ -1,0 +1,16 @@
+{
+  "description": "Favor short-side trades via higher min_confluence for longs. The discovered rule shows direction<0.50 (shorts) at 35.7% WR vs direction>=0.50 (longs) at 25.0% \u00e2\u20ac\u201d a 10.7pp gap and 1.43x relative edge for shorts. This aligns with SSS mechanics: the strategy detects supply/demand sequences, and short-side supply zones on gold tend to be more reliable because institutional sellers place limit orders at prior swing highs. Rather than filtering out longs entirely (losing optionality), require higher confluence for long entries by raising min_confluence_score from 2 to 3. Short trades already cluster at higher confluence naturally.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "min_confluence_score": 3
+      }
+    }
+  },
+  "expected_improvement": "Expect 2-3pp win rate improvement overall by filtering out low-conviction long setups that drag down the blended win rate. The hour_cos \u00c3\u2014 confluence_score interaction (0.1226, 4th strongest) confirms that confluence quality varies by time \u00e2\u20ac\u201d raising the bar means only the strongest long setups survive, while the naturally higher-quality short setups continue through. Should reduce trade count by ~15-20% but disproportionately cut losing longs.",
+  "confidence": "medium",
+  "id": "hyp_864cffea",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:23:10.533165+00:00"
+}

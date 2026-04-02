@@ -1,0 +1,124 @@
+{
+  "generated_at": "2026-04-02T15:23:10.551487+00:00",
+  "total_windows": 12,
+  "phase_1_pass_count": 4,
+  "phase_2_pass_count": 2,
+  "phase_1_pass_rate": 0.3333333333333333,
+  "phase_2_pass_rate": 0.16666666666666666,
+  "edges_discovered": 24,
+  "edges_validated": 0,
+  "edges_absorbed": 0,
+  "total_hypotheses_proposed": 12,
+  "total_hypotheses_validated": 0,
+  "total_config_changes": 0,
+  "per_window_summary": [
+    {
+      "window_id": "w_000",
+      "trade_count": 10,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_001",
+      "trade_count": 23,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_002",
+      "trade_count": 9,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 4,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_003",
+      "trade_count": 18,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_004",
+      "trade_count": 100,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_005",
+      "trade_count": 81,
+      "regime": null,
+      "challenge_p1": true,
+      "challenge_p2": true,
+      "shap_rules": 16,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_006",
+      "trade_count": 100,
+      "regime": null,
+      "challenge_p1": true,
+      "challenge_p2": true,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_007",
+      "trade_count": 13,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_008",
+      "trade_count": 65,
+      "regime": null,
+      "challenge_p1": true,
+      "challenge_p2": false,
+      "shap_rules": 2,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_009",
+      "trade_count": 35,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_010",
+      "trade_count": 21,
+      "regime": null,
+      "challenge_p1": false,
+      "challenge_p2": false,
+      "shap_rules": 0,
+      "config_changes": 0
+    },
+    {
+      "window_id": "w_011",
+      "trade_count": 46,
+      "regime": null,
+      "challenge_p1": true,
+      "challenge_p2": false,
+      "shap_rules": 2,
+      "config_changes": 0
+    }
+  ]
+}

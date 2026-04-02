@@ -1,0 +1,50 @@
+[
+  {
+    "feature_a": "hour_cos",
+    "feature_b": "direction",
+    "condition": "hour_cos>=0.63 AND direction<0.50",
+    "quadrant_win_rate": 0.1111,
+    "quadrant_avg_r": -0.6487,
+    "baseline_win_rate": 0.1667,
+    "n_trades": 18,
+    "lift": 0.667,
+    "interaction_strength": 0.1227,
+    "recommendation": "weak_filter"
+  },
+  {
+    "feature_a": "hour_sin",
+    "feature_b": "hour_cos",
+    "condition": "hour_sin>=0.75 AND hour_cos<0.63",
+    "quadrant_win_rate": 0.1,
+    "quadrant_avg_r": -0.7075,
+    "baseline_win_rate": 0.1667,
+    "n_trades": 10,
+    "lift": 0.6,
+    "interaction_strength": 0.0702,
+    "recommendation": "weak_filter"
+  },
+  {
+    "feature_a": "hour_cos",
+    "feature_b": "direction",
+    "condition": "hour_cos<0.63 AND direction>=0.50",
+    "quadrant_win_rate": 0.0833,
+    "quadrant_avg_r": -0.7344,
+    "baseline_win_rate": 0.1667,
+    "n_trades": 12,
+    "lift": 0.5,
+    "interaction_strength": 0.1227,
+    "recommendation": "weak_filter"
+  },
+  {
+    "feature_a": "hour_cos",
+    "feature_b": "dow_cos",
+    "condition": "hour_cos<0.63 AND dow_cos>=0.65",
+    "quadrant_win_rate": 0.0769,
+    "quadrant_avg_r": -0.7548,
+    "baseline_win_rate": 0.1667,
+    "n_trades": 13,
+    "lift": 0.462,
+    "interaction_strength": 0.0101,
+    "recommendation": "weak_filter"
+  }
+]

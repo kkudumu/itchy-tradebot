@@ -1,0 +1,306 @@
+{
+  "run_id": "sss_optimized_20260401_091226",
+  "timestamp": "2026-04-01T09:14:56.756143+00:00",
+  "metrics": {
+    "win_rate": 0.0,
+    "expectancy": 0.0,
+    "total_trades": 0.0,
+    "avg_r_multiple": 0.0,
+    "avg_win_r": 0.0,
+    "avg_loss_r": 0.0,
+    "profit_factor": null,
+    "gross_profit_r": 0.0,
+    "gross_loss_r": 0.0,
+    "sharpe_ratio": 0.0,
+    "sortino_ratio": 0.0,
+    "calmar_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "max_daily_dd_pct": 0.0,
+    "total_return_pct": 0.0,
+    "avg_trade_duration": null,
+    "consecutive_wins_max": 0.0,
+    "consecutive_losses_max": 0.0,
+    "dd_peak_date": null,
+    "dd_trough_date": null,
+    "initial_balance": 0.0,
+    "final_equity": 0.0,
+    "pipeline_counts": {
+      "signals_generated": 0,
+      "signals_filtered_in_trade": 0,
+      "signals_filtered_no_open": 0,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 0
+    }
+  },
+  "best_trades": [],
+  "worst_trades": [],
+  "edge_stats": {},
+  "config_snapshot": {
+    "active_strategies": [
+      "sss"
+    ],
+    "strategies": {
+      "ichimoku": {
+        "ichimoku": {
+          "tenkan_period": 9,
+          "kijun_period": 26,
+          "senkou_b_period": 52
+        },
+        "adx": {
+          "period": 14,
+          "threshold": 20
+        },
+        "atr": {
+          "period": 14,
+          "stop_multiplier": 2.5
+        },
+        "signal": {
+          "min_confluence_score": 1,
+          "tier_a_plus": 7,
+          "tier_b": 5,
+          "tier_c": 1,
+          "timeframes": [
+            "15M",
+            "5M"
+          ]
+        }
+      },
+      "asian_breakout": {
+        "enabled": true,
+        "weight": 1.0,
+        "asian_session_start_utc": "21:00",
+        "asian_session_end_utc": "06:00",
+        "london_entry_start_utc": "06:00",
+        "london_entry_end_utc": "20:00",
+        "min_range_pips": 3,
+        "max_range_pips": 80,
+        "rr_ratio": 2.0,
+        "atr_period": 14
+      },
+      "ema_pullback": {
+        "enabled": true,
+        "weight": 1.0,
+        "fast_ema": 8,
+        "mid_ema": 18,
+        "slow_ema": 50,
+        "atr_period": 14,
+        "min_ema_angle_deg": 2,
+        "max_ema_angle_deg": 95,
+        "pullback_candles_min": 1,
+        "pullback_candles_max": 20,
+        "breakout_window_bars": 20,
+        "rr_ratio": 2.0
+      },
+      "sss": {
+        "enabled": true,
+        "weight": 1.0,
+        "swing_lookback_n": 3,
+        "min_swing_pips": 5.0,
+        "ss_candle_min": 13,
+        "iss_candle_min": 4,
+        "iss_candle_max": 6,
+        "max_bars_in_state": 100,
+        "max_active_levels": 50,
+        "require_cbc_context": false,
+        "fifty_tap_level": 0.5,
+        "fifty_tap_tolerance_pips": 0.5,
+        "entry_mode": "combined",
+        "min_confluence_score": 5,
+        "tier_a_plus": 7,
+        "tier_b": 5,
+        "warmup_bars": 50,
+        "spread_multiplier": 2.0,
+        "min_stop_pips": 10.0,
+        "rr_ratio": 2.0
+      }
+    },
+    "edges": {
+      "time_of_day": {
+        "enabled": false,
+        "params": {
+          "start_utc": "06:00",
+          "end_utc": "21:00"
+        }
+      },
+      "day_of_week": {
+        "enabled": false,
+        "params": {
+          "allowed_days": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "london_open_delay": {
+        "enabled": false,
+        "params": {
+          "london_open_utc": "08:00",
+          "delay_minutes": 30
+        }
+      },
+      "candle_close_confirmation": {
+        "enabled": false,
+        "params": {}
+      },
+      "spread_filter": {
+        "enabled": false,
+        "params": {
+          "max_spread_points": 30
+        }
+      },
+      "news_filter": {
+        "enabled": false,
+        "params": {
+          "block_minutes_before": 30,
+          "block_minutes_after": 30,
+          "impact_levels": [
+            "red"
+          ]
+        }
+      },
+      "friday_close": {
+        "enabled": true,
+        "params": {
+          "close_time_utc": "20:00",
+          "day": 4
+        }
+      },
+      "regime_filter": {
+        "enabled": false,
+        "params": {
+          "adx_min": 28,
+          "cloud_thickness_percentile": 50
+        }
+      },
+      "time_stop": {
+        "enabled": false,
+        "params": {
+          "candle_limit": 12,
+          "breakeven_r_threshold": 0.5
+        }
+      },
+      "bb_squeeze": {
+        "enabled": false,
+        "params": {
+          "bb_period": 20,
+          "bb_std": 2.0,
+          "squeeze_threshold": 0.05,
+          "confidence_boost": 1
+        }
+      },
+      "confluence_scoring": {
+        "enabled": false,
+        "params": {
+          "min_score": 4,
+          "tier_a_plus_threshold": 7,
+          "tier_b_threshold": 5,
+          "tier_c_threshold": 4,
+          "tier_b_size_pct": 0.75,
+          "tier_c_size_pct": 0.5
+        }
+      },
+      "equity_curve": {
+        "enabled": false,
+        "params": {
+          "lookback_trades": 20,
+          "reduced_size_multiplier": 0.5
+        }
+      },
+      "trading_costs": {
+        "commission_per_lot": 4.0,
+        "spread_points": 0.15
+      },
+      "strategy_profiles": {
+        "sss": {
+          "spread": {
+            "enabled": true,
+            "max_spread_pips": 50
+          },
+          "friday_close": {
+            "enabled": true,
+            "close_hour_utc": 20
+          },
+          "equity_curve": {
+            "enabled": true
+          },
+          "circuit_breaker": {
+            "enabled": true
+          },
+          "time_filter": {
+            "enabled": false
+          },
+          "news_filter": {
+            "enabled": false
+          }
+        }
+      }
+    },
+    "risk": {
+      "initial_risk_pct": 0.5,
+      "reduced_risk_pct": 0.75,
+      "phase_threshold_pct": 4.0,
+      "daily_circuit_breaker_pct": 4.5,
+      "max_concurrent_positions": 3,
+      "max_lot_size": 1.0,
+      "min_stop_spread_multiplier": 2.0
+    },
+    "exit": {
+      "strategy": "hybrid_50_50",
+      "tp_r_multiple": 1.5,
+      "trail_type": "kijun",
+      "breakeven_threshold_r": 1.0,
+      "kijun_trail_start_r": 1.5,
+      "higher_tf_kijun_start_r": 3.0
+    },
+    "prop_firm": {
+      "name": "the5ers_2step_high_stakes",
+      "account_size": 10000,
+      "leverage": 100,
+      "phase_1": {
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "phase_2": {
+        "profit_target_pct": 5.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "funded": {
+        "monthly_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0
+      }
+    },
+    "initial_risk_pct": 0.5,
+    "reduced_risk_pct": 0.75,
+    "phase_threshold_pct": 4.0,
+    "tp_r_multiple": 1.5,
+    "kijun_trail_start_r": 1.5,
+    "higher_tf_kijun_start_r": 3.0,
+    "atr_stop_multiplier": 2.5
+  },
+  "comparison": {
+    "has_previous": false
+  },
+  "optimization": {
+    "best_score": 0.0,
+    "best_params": {
+      "sss_swing_lookback_n": 3,
+      "sss_min_swing_pips": 5.0,
+      "sss_ss_candle_min": 13,
+      "sss_iss_candle_min": 4,
+      "sss_iss_candle_max": 6,
+      "sss_entry_mode": "combined",
+      "sss_min_confluence_score": 5
+    },
+    "best_trial_number": 0,
+    "n_trials": 30,
+    "elapsed_seconds": 0.2793973000079859
+  }
+}

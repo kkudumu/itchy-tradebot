@@ -1,0 +1,26 @@
+[
+  {
+    "feature_a": "hour_sin",
+    "feature_b": "hour_cos",
+    "condition": "hour_sin<0.75 AND hour_cos<0.63",
+    "quadrant_win_rate": 0.3625,
+    "quadrant_avg_r": 0.543,
+    "baseline_win_rate": 0.3031,
+    "n_trades": 80,
+    "lift": 1.196,
+    "interaction_strength": 0.083,
+    "recommendation": "weak_filter"
+  },
+  {
+    "feature_a": "hour_sin",
+    "feature_b": "risk_pct",
+    "condition": "hour_sin<0.75 AND risk_pct<0.50",
+    "quadrant_win_rate": 0.3614,
+    "quadrant_avg_r": 0.4186,
+    "baseline_win_rate": 0.3031,
+    "n_trades": 83,
+    "lift": 1.192,
+    "interaction_strength": 0.0747,
+    "recommendation": "weak_filter"
+  }
+]

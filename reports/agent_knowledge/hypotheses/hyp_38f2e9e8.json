@@ -1,0 +1,16 @@
+{
+  "description": "Raise min_confluence_score from 2 to 3. confluence_score has 0.6643 mean |SHAP| \u00e2\u20ac\u201d 3rd most important predictor. The current threshold of 2 on a 0-8 scale is extremely permissive (only requires 1 of 6 confluence components beyond minimum). The SSS confluence score sums: SS alignment (+2), ISS alignment (+2), CBC confirmation (+1), fifty-tap (+1), target proximity (+1), no F2 conflict (+1). A score of 2 means essentially zero alignment beyond the entry trigger. Raising to 3 requires at least one structural alignment component (e.g., SS direction matching sequence direction), filtering out trades with no contextual support.",
+  "config_change": {
+    "strategies": {
+      "sss": {
+        "min_confluence_score": 3
+      }
+    }
+  },
+  "expected_improvement": "Filters out the bottom tier of low-conviction setups. Given confluence_score's high SHAP importance, trades with score=2 are likely dragging down overall performance. Expected win rate improvement of 2-4 percentage points on retained trades. Also reduces overtrading, which helps with prop firm daily loss limits.",
+  "confidence": "medium",
+  "id": "hyp_38f2e9e8",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:14:50.283390+00:00"
+}

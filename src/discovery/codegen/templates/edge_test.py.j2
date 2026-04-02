@@ -1,0 +1,72 @@
+"""Tests for {{ filter_spec.class_name }} (auto-generated)."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+
+from src.edges.base import EdgeContext, EdgeResult
+
+
+def _make_context(**overrides) -> EdgeContext:
+    """Build a minimal EdgeContext with sensible defaults."""
+    defaults = dict(
+        timestamp=datetime(2024, 6, 15, 10, 0, tzinfo=timezone.utc),
+        day_of_week=5,  # Saturday (won't matter for most filters)
+        close_price=2350.0,
+        high_price=2355.0,
+        low_price=2345.0,
+        spread=15.0,
+        session="london",
+        adx=30.0,
+        atr=5.0,
+        indicator_values={},
+        bb_squeeze=False,
+        confluence_score=4,
+    )
+    defaults.update(overrides)
+    return EdgeContext(**defaults)
+
+
+class Test{{ filter_spec.class_name }}:
+    def _make_filter(self, **param_overrides):
+        from src.edges.generated.{{ filter_spec.name }} import {{ filter_spec.class_name }}
+        params = {
+{%- for param_name, param_def in filter_spec.params.items() %}
+            "{{ param_name }}": {{ param_def.default }},
+{%- endfor %}
+        }
+        params.update(param_overrides)
+        return {{ filter_spec.class_name }}({"enabled": True, "params": params})
+
+    def test_allows_when_condition_met(self):
+        """Filter should allow when the condition is satisfied."""
+        f = self._make_filter()
+        ctx = _make_context()
+        result = f.should_allow(ctx)
+        assert isinstance(result, EdgeResult)
+        assert result.edge_name == "{{ filter_spec.name }}"
+
+    def test_blocks_when_condition_violated(self):
+        """Filter should block when the condition is violated."""
+        f = self._make_filter()
+        ctx = _make_context()
+        result = f.should_allow(ctx)
+        assert isinstance(result, EdgeResult)
+
+    def test_disabled_passes_through(self):
+        """Disabled filter must always return allowed=True."""
+        from src.edges.generated.{{ filter_spec.name }} import {{ filter_spec.class_name }}
+        f = {{ filter_spec.class_name }}({"enabled": False, "params": {}})
+        ctx = _make_context()
+        result = f.should_allow(ctx)
+        assert result.allowed is True
+        assert "disabled" in result.reason.lower() or "skipping" in result.reason.lower()
+
+    def test_returns_correct_edge_name(self):
+        """Result must carry the filter's registered name."""
+        f = self._make_filter()
+        ctx = _make_context()
+        result = f.should_allow(ctx)
+        assert result.edge_name == "{{ filter_spec.name }}"

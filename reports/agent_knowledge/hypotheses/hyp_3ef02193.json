@@ -1,0 +1,20 @@
+{
+  "description": "Tighten trading window to core London/NY overlap. hour_cos is the #1 SHAP feature (0.2769) with strong interactions to direction (0.1383) and confluence_score (0.1226). The cosine encoding means the model is highly sensitive to which hours trades fire. The current window (08:00-17:00 UTC) includes late NY session where gold momentum fades. Narrowing to 08:00-14:00 UTC captures the London-NY overlap \u00e2\u20ac\u201d gold's highest-liquidity, highest-follow-through window \u00e2\u20ac\u201d while dropping the low-quality tail end where hour_cos SHAP influence is negative.",
+  "config_change": {
+    "edges": {
+      "time_of_day": {
+        "enabled": true,
+        "params": {
+          "start_utc": "08:00",
+          "end_utc": "14:00"
+        }
+      }
+    }
+  },
+  "expected_improvement": "Expect 2-4pp win rate improvement by eliminating late-session trades where gold reversal risk is highest. The session features (sess_london: 0.0241, sess_ny: 0.0223, sess_overlap: 0.0136) confirm overlap matters, but the much larger hour_cos SHAP (0.2769) suggests the specific hour within sessions is what drives outcomes. Fewer trades but higher quality \u00e2\u20ac\u201d net positive for prop firm challenge where drawdown control matters more than trade count.",
+  "confidence": "high",
+  "id": "hyp_3ef02193",
+  "strategy": "sss",
+  "status": "proposed",
+  "created_at": "2026-04-02T15:23:10.531906+00:00"
+}
