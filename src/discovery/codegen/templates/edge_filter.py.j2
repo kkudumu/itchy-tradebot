@@ -1,0 +1,42 @@
+"""
+{{ filter_spec.description }}
+
+Auto-generated EdgeFilter from discovery hypothesis.
+Evidence: {{ filter_spec.logic_description }}
+"""
+
+from __future__ import annotations
+
+from src.edges.base import EdgeContext, EdgeFilter, EdgeResult
+
+
+class {{ filter_spec.class_name }}(EdgeFilter):
+    """{{ filter_spec.description }}
+
+    Config keys (via ``params``):
+{% for param_name, param_def in filter_spec.params.items() %}
+        {{ param_name }}: {{ param_def.type }}  -- Default {{ param_def.default }}.
+{% endfor %}
+    """
+
+    def __init__(self, config: dict) -> None:
+        super().__init__("{{ filter_spec.name }}", config)
+        params = config.get("params", {})
+{% for param_name, param_def in filter_spec.params.items() %}
+{% if param_def.type == "float" %}
+        self._{{ param_name }} = float(params.get("{{ param_name }}", {{ param_def.default }}))
+{% elif param_def.type == "int" %}
+        self._{{ param_name }} = int(params.get("{{ param_name }}", {{ param_def.default }}))
+{% elif param_def.type == "bool" %}
+        self._{{ param_name }} = bool(params.get("{{ param_name }}", {{ param_def.default }}))
+{% else %}
+        self._{{ param_name }} = params.get("{{ param_name }}", {{ param_def.default }})
+{% endif %}
+{% endfor %}
+
+    def should_allow(self, context: EdgeContext) -> EdgeResult:
+        if not self.enabled:
+            return self._disabled_result()
+
+        # TODO: LLM fills in the actual filter logic here
+        raise NotImplementedError("LLM must generate the filter logic")
