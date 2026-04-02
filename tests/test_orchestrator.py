@@ -226,3 +226,135 @@ class TestProcessWindow:
             result = orch.process_window(window, base_config={})
 
         assert result["discovery"]["shap_ran"] or True  # may not run if insufficient accumulated trades
+
+
+class TestRunLoop:
+    def test_run_loop_processes_all_windows(self):
+        from src.discovery.orchestrator import DiscoveryOrchestrator
+
+        candles = _make_candles(n_days=44)  # 2 windows
+        kb_dir = str(Path(tempfile.mkdtemp()) / "kb")
+        reports_dir = str(Path(tempfile.mkdtemp()) / "reports")
+
+        orch = DiscoveryOrchestrator(
+            config={
+                "orchestrator": {"window_size_trading_days": 22, "max_windows": 5},
+                "discovery": {"shap_every_n_windows": 3, "min_trades_for_shap": 5},
+                "challenge": {"account_size": 10000.0},
+                "reporting": {"reports_dir": reports_dir},
+                "validation": {"min_oos_windows": 2},
+            },
+            knowledge_dir=kb_dir,
+        )
+
+        with patch("src.discovery.orchestrator.IchimokuBacktester") as MockBT:
+            mock_result = MagicMock()
+            mock_result.trades = [
+                {"r_multiple": 1.5, "risk_pct": 1.0, "context": {}, "day_index": i}
+                for i in range(5)
+            ]
+            mock_result.metrics = {"win_rate": 0.50, "total_trades": 5}
+            mock_result.prop_firm = {"status": "ongoing"}
+            MockBT.return_value.run.return_value = mock_result
+
+            summary = orch.run(candles)
+
+        assert "windows_processed" in summary
+        assert summary["windows_processed"] >= 2
+        assert "summary_report" in summary
+
+    def test_run_loop_respects_max_windows(self):
+        from src.discovery.orchestrator import DiscoveryOrchestrator
+
+        candles = _make_candles(n_days=88)  # 4 windows
+        kb_dir = str(Path(tempfile.mkdtemp()) / "kb")
+
+        orch = DiscoveryOrchestrator(
+            config={
+                "orchestrator": {"window_size_trading_days": 22, "max_windows": 2},
+                "reporting": {"reports_dir": str(Path(tempfile.mkdtemp()) / "r")},
+            },
+            knowledge_dir=kb_dir,
+        )
+
+        with patch("src.discovery.orchestrator.IchimokuBacktester") as MockBT:
+            mock_result = MagicMock()
+            mock_result.trades = []
+            mock_result.metrics = {"win_rate": 0.0, "total_trades": 0}
+            mock_result.prop_firm = {"status": "ongoing"}
+            MockBT.return_value.run.return_value = mock_result
+
+            summary = orch.run(candles)
+
+        assert summary["windows_processed"] <= 2
+
+    def test_run_loop_applies_validated_config_changes(self):
+        from src.discovery.orchestrator import DiscoveryOrchestrator
+
+        candles = _make_candles(n_days=66)  # 3 windows
+        kb_dir = str(Path(tempfile.mkdtemp()) / "kb")
+        reports_dir = str(Path(tempfile.mkdtemp()) / "reports")
+
+        orch = DiscoveryOrchestrator(
+            config={
+                "orchestrator": {"window_size_trading_days": 22, "max_windows": 3},
+                "discovery": {"shap_every_n_windows": 3, "min_trades_for_shap": 5},
+                "validation": {"min_oos_windows": 1, "min_improvement_pct": 0.0},
+                "reporting": {"reports_dir": reports_dir},
+            },
+            knowledge_dir=kb_dir,
+        )
+
+        call_count = [0]
+
+        def _make_mock_result():
+            m = MagicMock()
+            call_count[0] += 1
+            # Simulate improving metrics across windows
+            win_rate = 0.30 + call_count[0] * 0.05
+            m.trades = [
+                {"r_multiple": 1.5 if i % 3 == 0 else -1.0,
+                 "risk_pct": 1.0, "context": {"adx_value": 30.0},
+                 "day_index": i % 22}
+                for i in range(20)
+            ]
+            m.metrics = {"win_rate": win_rate, "total_trades": 20}
+            m.prop_firm = {"status": "ongoing"}
+            return m
+
+        with patch("src.discovery.orchestrator.IchimokuBacktester") as MockBT:
+            MockBT.return_value.run.side_effect = lambda *a, **kw: _make_mock_result()
+
+            summary = orch.run(candles, base_config={"strategies": {"sss": {}}})
+
+        assert summary["windows_processed"] == 3
+        assert "config_evolution" in summary
+
+    def test_run_loop_generates_summary_report(self):
+        from src.discovery.orchestrator import DiscoveryOrchestrator
+
+        candles = _make_candles(n_days=22)
+        kb_dir = str(Path(tempfile.mkdtemp()) / "kb")
+        reports_dir = str(Path(tempfile.mkdtemp()) / "reports")
+
+        orch = DiscoveryOrchestrator(
+            config={
+                "orchestrator": {"window_size_trading_days": 22},
+                "reporting": {"reports_dir": reports_dir},
+            },
+            knowledge_dir=kb_dir,
+        )
+
+        with patch("src.discovery.orchestrator.IchimokuBacktester") as MockBT:
+            mock_result = MagicMock()
+            mock_result.trades = []
+            mock_result.metrics = {"win_rate": 0.0}
+            mock_result.prop_firm = {"status": "ongoing"}
+            MockBT.return_value.run.return_value = mock_result
+
+            summary = orch.run(candles)
+
+        assert "summary_report" in summary
+        # Check that summary report file was written
+        summary_path = Path(reports_dir) / "discovery_summary.json"
+        assert summary_path.exists()
