@@ -52,3 +52,64 @@ class TestChartPatternDataclass:
         assert d["pattern_type"] == "head_and_shoulders"
         assert isinstance(d["key_prices"], list)
         assert "confidence" in d
+
+
+class TestDoubleTopBottom:
+    def test_detects_double_top(self):
+        from src.discovery.chart_patterns import PatternDetector, ChartPattern
+
+        # Classic double top: high, low, high (roughly equal peaks)
+        swings = [
+            _make_swing(2050.0, "high", index=10),
+            _make_swing(2030.0, "low", index=20),
+            _make_swing(2051.0, "high", index=30),  # second peak ~equal
+            _make_swing(2025.0, "low", index=40),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_double_tops(swings)
+
+        assert len(patterns) >= 1
+        p = patterns[0]
+        assert p.pattern_type == "double_top"
+        assert p.direction == "bearish"
+        assert p.confidence > 0.5
+
+    def test_detects_double_bottom(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Classic double bottom: low, high, low (roughly equal troughs)
+        swings = [
+            _make_swing(2020.0, "low", index=10),
+            _make_swing(2040.0, "high", index=20),
+            _make_swing(2019.5, "low", index=30),  # second trough ~equal
+            _make_swing(2045.0, "high", index=40),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_double_bottoms(swings)
+
+        assert len(patterns) >= 1
+        p = patterns[0]
+        assert p.pattern_type == "double_bottom"
+        assert p.direction == "bullish"
+
+    def test_rejects_unequal_peaks(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Peaks too far apart to be a double top
+        swings = [
+            _make_swing(2050.0, "high", index=10),
+            _make_swing(2030.0, "low", index=20),
+            _make_swing(2070.0, "high", index=30),  # 20 points higher -- not double top
+            _make_swing(2025.0, "low", index=40),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_double_tops(swings)
+
+        assert len(patterns) == 0
+
+    def test_empty_swings_returns_empty(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        detector = PatternDetector(atr=5.0)
+        assert detector.detect_double_tops([]) == []
+        assert detector.detect_double_bottoms([]) == []
