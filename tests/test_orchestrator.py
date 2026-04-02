@@ -402,3 +402,35 @@ class TestDashboardIntegration:
 
         payload = gen.get_dashboard_payload()
         assert payload["discovery"]["total_windows"] == 1
+
+
+class TestDiscoveryCLI:
+    def test_cli_parser_defaults(self):
+        from scripts.run_discovery_loop import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args([
+            "--data-file", "data/xauusd_1m.parquet",
+        ])
+
+        assert args.data_file == "data/xauusd_1m.parquet"
+        assert args.max_windows == 12
+        assert args.window_size == 22
+        assert args.strategy == "sss"
+
+    def test_cli_parser_overrides(self):
+        from scripts.run_discovery_loop import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args([
+            "--data-file", "data.parquet",
+            "--max-windows", "6",
+            "--window-size", "30",
+            "--strategy", "asian_breakout",
+            "--enable-claude",
+        ])
+
+        assert args.max_windows == 6
+        assert args.window_size == 30
+        assert args.strategy == "asian_breakout"
+        assert args.enable_claude is True
