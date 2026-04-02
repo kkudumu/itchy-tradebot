@@ -57,6 +57,15 @@ _VOL_REGIME_MAP: Dict[str, float] = {
     "high":   1.0,
 }
 
+# macro regime ordinal encoding
+_REGIME_MAP: Dict[str, float] = {
+    "risk_on":        0.0,
+    "risk_off":       0.25,
+    "dollar_driven":  0.5,
+    "inflation_fear": 0.75,
+    "mixed":          1.0,
+}
+
 # session names → boolean flags (london, ny, asian, overlap)
 _SESSION_LONDON  = {"london"}
 _SESSION_NY      = {"new_york", "ny", "new york", "newyork"}
@@ -298,7 +307,32 @@ class FeatureVectorBuilder:
         daily_range = float(context.get("daily_range") or 0.0)
         vec[58] = self._normalize_continuous(daily_range / atr, 0.0, 5.0)
 
-        # dims 59–63: reserved → 0.0
+        # dim 59: dxy_pct_change — DXY daily % change, normalised [-2%, 2%] -> [0, 1]
+        # Only fill if macro data is actually present (absent -> 0.0)
+        if context.get("dxy_pct_change") is not None:
+            dxy_pct = float(context["dxy_pct_change"])
+            vec[59] = self._normalize_continuous(dxy_pct, -2.0, 2.0)
+
+        # dim 60: spx_pct_change — SPX daily % change, normalised [-3%, 3%] -> [0, 1]
+        if context.get("spx_pct_change") is not None:
+            spx_pct = float(context["spx_pct_change"])
+            vec[60] = self._normalize_continuous(spx_pct, -3.0, 3.0)
+
+        # dim 61: us10y_pct_change — US10Y yield daily % change, normalised [-5%, 5%] -> [0, 1]
+        if context.get("us10y_pct_change") is not None:
+            us10y_pct = float(context["us10y_pct_change"])
+            vec[61] = self._normalize_continuous(us10y_pct, -5.0, 5.0)
+
+        # dim 62: macro_regime — ordinal encoding of daily regime label
+        regime_str = str(context.get("macro_regime") or "").lower().strip()
+        vec[62] = _REGIME_MAP.get(regime_str, 0.0)
+
+        # dim 63: event_proximity — hours to nearest event, inverted [0=far, 1=imminent]
+        # Normalised: 0h = 1.0 (imminent), 24h+ = 0.0 (far)
+        hours_to_event = float(context.get("hours_to_event") or 0.0)
+        if hours_to_event > 0:
+            vec[63] = self._normalize_continuous(24.0 - hours_to_event, 0.0, 24.0)
+        # else: 0.0 (no event data)
 
         # Guarantee all values are finite and within [0, 1]
         np.clip(vec, 0.0, 1.0, out=vec)

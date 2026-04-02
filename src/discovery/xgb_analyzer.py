@@ -40,7 +40,7 @@ FEATURE_NAMES: List[str] = [
     "sig_r50", "sig_r51", "sig_r52", "sig_r53", "sig_r54",
     # Regime (55-63)
     "trend_strength", "vol_regime", "spread_norm", "daily_range_vs_atr",
-    "regime_r59", "regime_r60", "regime_r61", "regime_r62", "regime_r63",
+    "dxy_pct_change", "spx_pct_change", "us10y_pct_change", "macro_regime", "event_proximity",
 ]
 
 assert len(FEATURE_NAMES) == VECTOR_DIM
