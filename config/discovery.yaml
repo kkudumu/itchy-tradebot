@@ -1,0 +1,44 @@
+# config/discovery.yaml
+# Configuration for the Creative Pattern Discovery Agent orchestrator.
+
+orchestrator:
+  window_size_trading_days: 22       # 1 month of trading days per window
+  max_windows: 12                    # Max rolling windows to process (~1 year)
+  strategy_name: sss                 # Target strategy for discovery
+
+discovery:
+  shap_every_n_windows: 3            # Run Phase 1 SHAP every 3 windows (~66 trading days)
+  min_trades_for_shap: 30            # Minimum accumulated trades before SHAP runs
+  screenshot_extreme_pct: 10         # Phase 2: screenshot top/bottom 10% of trades by R
+  max_screenshots_per_window: 6      # Cap screenshots per window to control cost
+  regime_enabled: true               # Phase 3: classify each day's macro regime
+  codegen_enabled: true              # Phase 4: generate EdgeFilter code from discoveries
+
+validation:
+  min_oos_windows: 2                 # Edge must improve on 2+ OOS windows
+  min_improvement_pct: 1.0           # Minimum pass rate improvement (percentage points)
+  max_degradation_pct: 2.0           # Revert if pass rate drops by this much
+  revert_on_degradation: true        # Auto-revert config if edge degrades performance
+
+challenge:
+  phase_1_target_pct: 8.0            # The5ers Phase 1 profit target
+  phase_2_target_pct: 5.0            # The5ers Phase 2 profit target
+  max_daily_dd_pct: 5.0              # Maximum daily drawdown
+  max_total_dd_pct: 10.0             # Maximum total drawdown
+  account_size: 10000.0              # Starting balance per window
+
+memory:
+  knowledge_dir: reports/agent_knowledge
+  patterns_dir: reports/agent_knowledge/patterns
+  edges_yaml_path: config/edges.yaml
+  max_working_memory_items: 100      # Cap cross-window pattern storage
+
+reporting:
+  reports_dir: reports/discovery
+  per_window_report: true
+  summary_report: true
+  dashboard_integration: true        # Push findings to OptimizationDashboardServer
+
+claude:
+  command: ["claude", "-p", "--dangerously-skip-permissions"]
+  timeout_seconds: 600
