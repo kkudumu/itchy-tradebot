@@ -113,3 +113,62 @@ class TestDoubleTopBottom:
         detector = PatternDetector(atr=5.0)
         assert detector.detect_double_tops([]) == []
         assert detector.detect_double_bottoms([]) == []
+
+
+class TestHeadAndShoulders:
+    def test_detects_head_and_shoulders(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Classic H&S: left shoulder, head (highest), right shoulder (roughly equal to left)
+        swings = [
+            _make_swing(2040.0, "high", index=10),   # left shoulder
+            _make_swing(2025.0, "low", index=15),     # left neckline
+            _make_swing(2055.0, "high", index=25),    # head (highest)
+            _make_swing(2024.0, "low", index=35),     # right neckline
+            _make_swing(2041.0, "high", index=45),    # right shoulder (~left)
+            _make_swing(2020.0, "low", index=55),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_head_and_shoulders(swings)
+
+        assert len(patterns) >= 1
+        p = patterns[0]
+        assert p.pattern_type == "head_and_shoulders"
+        assert p.direction == "bearish"
+        assert p.confidence > 0.5
+
+    def test_detects_inverse_head_and_shoulders(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Inverse H&S: left shoulder, head (lowest), right shoulder (~left)
+        swings = [
+            _make_swing(2030.0, "low", index=10),     # left shoulder
+            _make_swing(2045.0, "high", index=15),     # left neckline
+            _make_swing(2015.0, "low", index=25),      # head (lowest)
+            _make_swing(2046.0, "high", index=35),     # right neckline
+            _make_swing(2029.0, "low", index=45),      # right shoulder (~left)
+            _make_swing(2050.0, "high", index=55),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_inverse_head_and_shoulders(swings)
+
+        assert len(patterns) >= 1
+        p = patterns[0]
+        assert p.pattern_type == "inverse_head_and_shoulders"
+        assert p.direction == "bullish"
+
+    def test_rejects_when_head_not_highest(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # "Head" is not the highest peak -- not valid H&S
+        swings = [
+            _make_swing(2050.0, "high", index=10),
+            _make_swing(2025.0, "low", index=15),
+            _make_swing(2045.0, "high", index=25),    # head LOWER than left shoulder
+            _make_swing(2024.0, "low", index=35),
+            _make_swing(2048.0, "high", index=45),
+            _make_swing(2020.0, "low", index=55),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_head_and_shoulders(swings)
+        assert len(patterns) == 0

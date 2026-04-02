@@ -243,3 +243,135 @@ class PatternDetector:
                 ))
 
         return patterns
+
+    # ------------------------------------------------------------------
+    # Head and Shoulders
+    # ------------------------------------------------------------------
+
+    def detect_head_and_shoulders(self, swings: List) -> List[ChartPattern]:
+        """Detect head & shoulders patterns.
+
+        Requires 5 swing points: H-L-H-L-H where the middle H is highest
+        and the two outer H's are roughly equal (within tolerance).
+        The two lows form the neckline.
+        """
+        if len(swings) < 5:
+            return []
+
+        patterns: List[ChartPattern] = []
+        highs = [(i, s) for i, s in enumerate(swings) if s.swing_type == "high"]
+
+        for h_idx in range(len(highs) - 2):
+            # Need 3 consecutive highs
+            i_ls, ls = highs[h_idx]       # left shoulder
+            i_hd, hd = highs[h_idx + 1]   # head
+            i_rs, rs = highs[h_idx + 2]   # right shoulder
+
+            # Head must be highest
+            if hd.price <= ls.price or hd.price <= rs.price:
+                continue
+
+            # Shoulders must be roughly equal
+            if not self._prices_equal(ls.price, rs.price):
+                continue
+
+            # Head must be meaningfully higher than shoulders (> 0.5 ATR)
+            head_prominence = hd.price - max(ls.price, rs.price)
+            if head_prominence < self._atr * 0.5:
+                continue
+
+            # Find neckline lows between shoulders and head
+            lows_left = [s for s in swings[i_ls + 1:i_hd] if s.swing_type == "low"]
+            lows_right = [s for s in swings[i_hd + 1:i_rs] if s.swing_type == "low"]
+
+            if not lows_left or not lows_right:
+                continue
+
+            nl_left = min(lows_left, key=lambda s: s.price)
+            nl_right = min(lows_right, key=lambda s: s.price)
+            neckline = (nl_left.price + nl_right.price) / 2
+
+            shoulder_conf = self._confidence_from_diff(ls.price, rs.price)
+            neckline_conf = self._confidence_from_diff(nl_left.price, nl_right.price)
+            conf = (shoulder_conf + neckline_conf) / 2
+
+            patterns.append(ChartPattern(
+                pattern_type="head_and_shoulders",
+                direction="bearish",
+                confidence=conf,
+                key_prices=[ls.price, hd.price, rs.price, neckline],
+                start_index=ls.index,
+                end_index=rs.index,
+                description=(
+                    f"H&S: shoulders {ls.price:.1f}/{rs.price:.1f}, "
+                    f"head {hd.price:.1f}, neckline {neckline:.1f}"
+                ),
+                swing_indices=[ls.index, nl_left.index, hd.index, nl_right.index, rs.index],
+            ))
+
+        return patterns
+
+    # ------------------------------------------------------------------
+    # Inverse Head and Shoulders
+    # ------------------------------------------------------------------
+
+    def detect_inverse_head_and_shoulders(self, swings: List) -> List[ChartPattern]:
+        """Detect inverse head & shoulders patterns.
+
+        Mirror of H&S: L-H-L-H-L where the middle L is lowest and
+        the two outer L's are roughly equal.
+        """
+        if len(swings) < 5:
+            return []
+
+        patterns: List[ChartPattern] = []
+        lows = [(i, s) for i, s in enumerate(swings) if s.swing_type == "low"]
+
+        for l_idx in range(len(lows) - 2):
+            i_ls, ls = lows[l_idx]         # left shoulder
+            i_hd, hd = lows[l_idx + 1]     # head (lowest)
+            i_rs, rs = lows[l_idx + 2]     # right shoulder
+
+            # Head must be lowest
+            if hd.price >= ls.price or hd.price >= rs.price:
+                continue
+
+            # Shoulders must be roughly equal
+            if not self._prices_equal(ls.price, rs.price):
+                continue
+
+            # Head must be meaningfully lower than shoulders
+            head_prominence = min(ls.price, rs.price) - hd.price
+            if head_prominence < self._atr * 0.5:
+                continue
+
+            # Find neckline highs between shoulders and head
+            highs_left = [s for s in swings[i_ls + 1:i_hd] if s.swing_type == "high"]
+            highs_right = [s for s in swings[i_hd + 1:i_rs] if s.swing_type == "high"]
+
+            if not highs_left or not highs_right:
+                continue
+
+            nl_left = max(highs_left, key=lambda s: s.price)
+            nl_right = max(highs_right, key=lambda s: s.price)
+            neckline = (nl_left.price + nl_right.price) / 2
+
+            shoulder_conf = self._confidence_from_diff(ls.price, rs.price)
+            neckline_conf = self._confidence_from_diff(nl_left.price, nl_right.price)
+            conf = (shoulder_conf + neckline_conf) / 2
+
+            patterns.append(ChartPattern(
+                pattern_type="inverse_head_and_shoulders",
+                direction="bullish",
+                confidence=conf,
+                key_prices=[ls.price, hd.price, rs.price, neckline],
+                start_index=ls.index,
+                end_index=rs.index,
+                description=(
+                    f"Inverse H&S: shoulders {ls.price:.1f}/{rs.price:.1f}, "
+                    f"head {hd.price:.1f}, neckline {neckline:.1f}"
+                ),
+                swing_indices=[ls.index, nl_left.index, hd.index, nl_right.index, rs.index],
+            ))
+
+        return patterns
