@@ -92,3 +92,85 @@ def build_training_data(
         len(X), y_binary.mean() * 100 if len(y_binary) else 0, y_r.mean() if len(y_r) else 0,
     )
     return X, y_binary, y_r
+
+
+# ---------------------------------------------------------------------------
+# XGBoost classifier
+# ---------------------------------------------------------------------------
+
+import xgboost as xgb
+from sklearn.model_selection import TimeSeriesSplit
+
+
+def train_classifier(
+    X: pd.DataFrame,
+    y: pd.Series,
+    y_r: pd.Series,
+) -> xgb.XGBClassifier:
+    """Train XGBoost on trade outcomes with class imbalance handling.
+
+    Uses scale_pos_weight for 37% win rate imbalance, R-weighted samples
+    to prioritize big winners, shallow trees to prevent overfitting on
+    small datasets (~100 trades), and TimeSeriesSplit CV.
+
+    Parameters
+    ----------
+    X: Feature matrix (n_trades, 64).
+    y: Binary labels (0=loss, 1=win).
+    y_r: R-multiples for sample weighting.
+
+    Returns
+    -------
+    Fitted XGBClassifier.
+    """
+    n_pos = int(y.sum())
+    n_neg = len(y) - n_pos
+    scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
+
+    # Sample weights: up-weight big winners so model learns what makes
+    # a GREAT trade, not just any win.
+    sample_weight = np.ones(len(y))
+    win_mask = y == 1
+    sample_weight[win_mask] = np.clip(y_r[win_mask].values, 1.0, 5.0)
+
+    model = xgb.XGBClassifier(
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        min_child_weight=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        scale_pos_weight=scale_pos_weight,
+        gamma=1.0,
+        reg_alpha=0.1,
+        reg_lambda=1.0,
+        eval_metric="logloss",
+        random_state=42,
+        n_jobs=-1,
+        verbosity=0,
+    )
+
+    # TimeSeriesSplit CV: never peek at future trades.
+    # Used only for early-stopping calibration; the final model is
+    # trained on all data with a fresh instance to avoid class mismatch.
+    best_n_estimators = 200
+    n_splits = min(3, max(2, len(X) // 15))
+    if len(X) >= 30:
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        for train_idx, val_idx in tscv.split(X):
+            # Skip folds where train or val has only one class
+            if len(set(y.iloc[train_idx])) < 2 or len(set(y.iloc[val_idx])) < 2:
+                continue
+            cv_model = xgb.XGBClassifier(**model.get_params())
+            cv_model.fit(
+                X.iloc[train_idx], y.iloc[train_idx],
+                sample_weight=sample_weight[train_idx],
+                eval_set=[(X.iloc[val_idx], y.iloc[val_idx])],
+                verbose=False,
+            )
+            best_n_estimators = cv_model.best_iteration + 1 if hasattr(cv_model, "best_iteration") and cv_model.best_iteration > 0 else best_n_estimators
+
+    # Final fit on all data with fresh model
+    model = xgb.XGBClassifier(**{**model.get_params(), "n_estimators": best_n_estimators})
+    model.fit(X, y, sample_weight=sample_weight, verbose=False)
+    return model

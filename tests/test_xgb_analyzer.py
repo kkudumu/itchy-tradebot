@@ -79,3 +79,47 @@ class TestBuildTrainingData:
 
         assert X.min().min() >= 0.0
         assert X.max().max() <= 1.0
+
+
+class TestTrainClassifier:
+    def _make_dataset(self, n=50, win_rate=0.37):
+        """Generate a synthetic dataset with known class balance."""
+        rng = np.random.default_rng(42)
+        X = pd.DataFrame(
+            rng.random((n, 64)),
+            columns=[f"f{i}" for i in range(64)],
+        )
+        n_wins = int(n * win_rate)
+        y = pd.Series([1] * n_wins + [0] * (n - n_wins))
+        y_r = pd.Series(
+            list(rng.uniform(0.5, 3.0, n_wins)) + list(rng.uniform(-2.0, -0.1, n - n_wins))
+        )
+        return X, y, y_r
+
+    def test_returns_fitted_model(self):
+        from src.discovery.xgb_analyzer import train_classifier
+
+        X, y, y_r = self._make_dataset()
+        model = train_classifier(X, y, y_r)
+
+        assert hasattr(model, "predict")
+        assert hasattr(model, "predict_proba")
+        preds = model.predict(X)
+        assert len(preds) == len(X)
+
+    def test_handles_small_dataset(self):
+        from src.discovery.xgb_analyzer import train_classifier
+
+        X, y, y_r = self._make_dataset(n=20)
+        model = train_classifier(X, y, y_r)
+        assert model is not None
+
+    def test_uses_scale_pos_weight(self):
+        from src.discovery.xgb_analyzer import train_classifier
+
+        X, y, y_r = self._make_dataset(n=100, win_rate=0.30)
+        model = train_classifier(X, y, y_r)
+
+        # Model should be aware of class imbalance
+        params = model.get_params()
+        assert params["scale_pos_weight"] > 1.0
