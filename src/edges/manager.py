@@ -27,7 +27,6 @@ from .time_stop import TimeStopFilter
 from .bb_squeeze import BBSqueezeAmplifier
 from .confluence_scoring import ConfluenceScoringFilter
 from .equity_curve import EquityCurveFilter
-from src.macro.event_proximity import EventProximityFilter
 
 
 # Mapping from config key → (constructor, category)
@@ -45,8 +44,21 @@ _REGISTRY: dict[str, tuple[type[EdgeFilter], str]] = {
     "bb_squeeze":                (BBSqueezeAmplifier,             "modifier"),
     "confluence_scoring":        (ConfluenceScoringFilter,        "entry+modifier"),
     "equity_curve":              (EquityCurveFilter,              "modifier"),
-    "event_proximity":           (EventProximityFilter,            "entry"),
 }
+
+
+def _get_full_registry() -> dict[str, tuple[type[EdgeFilter], str]]:
+    """Return the full registry including lazily-imported filters.
+
+    EventProximityFilter is imported lazily to avoid a circular import:
+    src.macro.econ_calendar -> src.edges.news_filter -> src.edges.__init__
+    -> manager -> src.macro.event_proximity -> src.macro.econ_calendar.
+    """
+    from src.macro.event_proximity import EventProximityFilter
+    return {
+        **_REGISTRY,
+        "event_proximity": (EventProximityFilter, "entry"),
+    }
 
 
 def _normalise_config(raw: Any) -> dict:
@@ -99,7 +111,7 @@ class EdgeManager:
 
         self._all_edges: dict[str, EdgeFilter] = {}
 
-        for key, (cls, category) in _REGISTRY.items():
+        for key, (cls, category) in _get_full_registry().items():
             # Pydantic dump uses the field name; fall back to a default if absent
             raw_cfg = configs.get(key, {})
             cfg = _normalise_config(raw_cfg) if not isinstance(raw_cfg, dict) else raw_cfg
