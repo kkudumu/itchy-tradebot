@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from src.backtesting.vectorbt_engine import IchimokuBacktester
+from src.backtesting.challenge_simulator import ChallengeSimulator, ChallengeSimulationResult
+from src.discovery.memory import LayeredMemory
+from src.discovery.runner import DiscoveryRunner
+from src.discovery.window_report import WindowReportGenerator
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,6 +63,46 @@ class DiscoveryOrchestrator:
         self._knowledge_dir = knowledge_dir
         self._edges_yaml_path = edges_yaml_path
         self._data_file = data_file
+
+        # Lazily initialised sub-components
+        self._memory: Optional[LayeredMemory] = None
+        self._discovery_runner: Optional[DiscoveryRunner] = None
+        self._report_gen: Optional[WindowReportGenerator] = None
+        self._challenge_sim: Optional[ChallengeSimulator] = None
+        self._components_ready = False
+
+    # ------------------------------------------------------------------
+    # Lazy init
+    # ------------------------------------------------------------------
+
+    def _init_components(self) -> None:
+        """Lazily initialise sub-components on first use."""
+        if self._components_ready:
+            return
+
+        reports_dir = self._report_cfg.get("reports_dir", "reports/discovery")
+
+        self._memory = LayeredMemory(
+            knowledge_dir=self._knowledge_dir,
+            edges_yaml_path=self._edges_yaml_path,
+        )
+        self._discovery_runner = DiscoveryRunner(
+            shap_every_n_windows=int(self._disc_cfg.get("shap_every_n_windows", 3)),
+            min_trades_for_shap=int(self._disc_cfg.get("min_trades_for_shap", 30)),
+            knowledge_dir=self._knowledge_dir,
+        )
+        self._report_gen = WindowReportGenerator(reports_dir=reports_dir)
+        self._challenge_sim = ChallengeSimulator(
+            account_size=float(self._challenge_cfg.get("account_size", 10_000.0)),
+            phase_1_target_pct=float(self._challenge_cfg.get("phase_1_target_pct", 8.0)),
+            phase_2_target_pct=float(self._challenge_cfg.get("phase_2_target_pct", 5.0)),
+            phase_1_max_loss_pct=float(self._challenge_cfg.get("max_total_dd_pct", 10.0)),
+            phase_1_daily_loss_pct=float(self._challenge_cfg.get("max_daily_dd_pct", 5.0)),
+            phase_2_max_loss_pct=float(self._challenge_cfg.get("max_total_dd_pct", 10.0)),
+            phase_2_daily_loss_pct=float(self._challenge_cfg.get("max_daily_dd_pct", 5.0)),
+        )
+
+        self._components_ready = True
 
     # ------------------------------------------------------------------
     # Data slicing
@@ -128,3 +174,169 @@ class DiscoveryOrchestrator:
             len(trading_days), len(windows), self._window_size,
         )
         return windows
+
+    # ------------------------------------------------------------------
+    # Single window processing
+    # ------------------------------------------------------------------
+
+    def process_window(
+        self,
+        window: Dict[str, Any],
+        base_config: Dict[str, Any],
+        enable_claude: bool = False,
+    ) -> Dict[str, Any]:
+        """Process a single rolling window.
+
+        1. Run backtest on the window's candle data
+        2. Run challenge simulator on resulting trades
+        3. Run Phase 1 discovery (SHAP) if on interval
+        4. Store results in layered memory
+        5. Generate per-window report
+
+        Parameters
+        ----------
+        window:
+            Dict from slice_into_windows() with candles, window_id, etc.
+        base_config:
+            Current strategy configuration to use for the backtest.
+        enable_claude:
+            Whether to invoke Claude CLI for hypothesis generation.
+
+        Returns
+        -------
+        Dict with window_id, trades, metrics, challenge_result, discovery.
+        """
+        self._init_components()
+
+        window_id = window["window_id"]
+        window_index = window["window_index"]
+        candles = window["candles"]
+
+        logger.info(
+            "Processing window %s (index=%d, %d bars, %d trading days)",
+            window_id, window_index, len(candles), window["trading_days"],
+        )
+
+        # ---- Step 1: Run backtest -------------------------------------------
+        backtester = IchimokuBacktester(config=base_config)
+        bt_result = backtester.run(
+            candles_1m=candles,
+            instrument="XAUUSD",
+            enable_learning=True,
+        )
+        trades = bt_result.trades
+        metrics = bt_result.metrics
+
+        # ---- Step 2: Challenge simulation -----------------------------------
+        challenge_result = self._run_challenge(trades, window["trading_days"])
+
+        # ---- Step 3: Phase 1 -- Discovery (SHAP) ----------------------------
+        discovery_result = self._discovery_runner.run_full_cycle(
+            window_id=window_id,
+            window_index=window_index,
+            trades=trades,
+            strategy_name=self._strategy_name,
+            base_config=base_config,
+            enable_claude=enable_claude,
+        )
+
+        # ---- Step 4: Phase 3 -- Regime tagging (placeholder) ----------------
+        regime = self._classify_regime(window)
+
+        # ---- Step 5: Store in layered memory --------------------------------
+        self._memory.store_short_term(window_id, {
+            "trades": trades,
+            "metrics": metrics,
+            "challenge_result": challenge_result,
+            "regime": regime,
+        })
+
+        # ---- Step 6: Generate per-window report -----------------------------
+        shap_findings = {}
+        if discovery_result.get("shap_ran"):
+            insight = discovery_result.get("insight")
+            shap_findings = {
+                "ran": True,
+                "rules_count": len(
+                    insight.actionable_rules if insight else []
+                ),
+            }
+
+        self._report_gen.generate_window_report(
+            window_id=window_id,
+            window_index=window_index,
+            trades=trades,
+            metrics=metrics,
+            challenge_result=challenge_result,
+            shap_findings=shap_findings,
+            regime=regime,
+            config_changes=discovery_result.get("changes", []),
+            hypotheses=discovery_result.get("hypotheses", []),
+        )
+
+        return {
+            "window_id": window_id,
+            "window_index": window_index,
+            "trades": trades,
+            "metrics": metrics,
+            "challenge_result": challenge_result,
+            "discovery": discovery_result,
+            "regime": regime,
+        }
+
+    def _run_challenge(
+        self,
+        trades: List[Dict[str, Any]],
+        trading_days: int,
+    ) -> Dict[str, Any]:
+        """Run challenge simulation on a window's trades.
+
+        Returns a dict with passed_phase_1, passed_phase_2, pass_rate, etc.
+        """
+        # Ensure trades have required fields for ChallengeSimulator
+        sim_trades = []
+        for t in trades:
+            sim_trades.append({
+                "r_multiple": t.get("r_multiple", 0.0),
+                "risk_pct": t.get("risk_pct", 1.0),
+                "day_index": t.get("day_index", 0),
+            })
+
+        if not sim_trades:
+            return {
+                "passed_phase_1": False,
+                "passed_phase_2": False,
+                "pass_rate": 0.0,
+                "failure_reason": "no_trades",
+            }
+
+        result: ChallengeSimulationResult = self._challenge_sim.run_rolling(
+            trades=sim_trades,
+            total_trading_days=trading_days,
+        )
+
+        return {
+            "passed_phase_1": result.phase_1_pass_count > 0,
+            "passed_phase_2": result.full_pass_count > 0,
+            "pass_rate": result.pass_rate,
+            "phase_1_pass_count": result.phase_1_pass_count,
+            "full_pass_count": result.full_pass_count,
+            "total_windows": result.total_windows,
+            "failure_breakdown": result.failure_breakdown,
+        }
+
+    def _classify_regime(self, window: Dict[str, Any]) -> Optional[str]:
+        """Classify the macro regime for a window.
+
+        Placeholder -- Phase 3 RegimeClassifier integration will replace
+        this with actual DXY/SPX/US10Y classification.
+        """
+        try:
+            from src.discovery.regime_classifier import RegimeClassifier
+            classifier = RegimeClassifier()
+            return classifier.classify_window(
+                start_date=window["start_date"],
+                end_date=window["end_date"],
+            )
+        except (ImportError, AttributeError):
+            return None
