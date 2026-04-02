@@ -241,6 +241,9 @@ class DiscoveryOrchestrator:
             enable_claude=enable_claude,
         )
 
+        # ---- Step 3b: Phase 4 -- Codegen (optional) --------------------------
+        self._try_codegen(discovery_result)
+
         # ---- Step 4: Phase 3 -- Regime tagging (placeholder) ----------------
         regime = self._classify_regime(window)
 
@@ -333,7 +336,7 @@ class DiscoveryOrchestrator:
         this with actual DXY/SPX/US10Y classification.
         """
         try:
-            from src.discovery.regime_classifier import RegimeClassifier
+            from src.macro.regime_classifier import RegimeClassifier
             classifier = RegimeClassifier()
             return classifier.classify_window(
                 start_date=window["start_date"],
@@ -341,6 +344,64 @@ class DiscoveryOrchestrator:
             )
         except (ImportError, AttributeError):
             return None
+
+    def _try_codegen(self, discovery_result: Dict[str, Any]) -> None:
+        """Attempt Phase 4 code generation for strong discovery rules.
+
+        If SHAP analysis found actionable rules with a 'strong_filter'
+        recommendation, invoke the safety pipeline to generate and validate
+        new EdgeFilter code.  Codegen is optional -- failures are logged
+        and swallowed so they never break the main loop.
+        """
+        insight = discovery_result.get("insight")
+        if insight is None:
+            return
+
+        actionable_rules = getattr(insight, "actionable_rules", None) or []
+        strong_rules = [r for r in actionable_rules if r.get("recommendation") == "strong_filter"]
+        if not strong_rules:
+            return
+
+        try:
+            from src.discovery.codegen.safety_pipeline import SafetyPipeline
+            from src.discovery.codegen.llm_generator import generate_edge_filter
+            from src.discovery.codegen.registry import register_filter
+
+            pipeline = SafetyPipeline()
+
+            for rule in strong_rules:
+                try:
+                    generated = generate_edge_filter(rule)
+                    if generated is None or not generated.filter_code:
+                        continue
+
+                    result = pipeline.run(
+                        filter_code=generated.filter_code,
+                        test_code=generated.test_code,
+                        filter_name=generated.filter_name,
+                        filter_class_name=generated.filter_class_name,
+                        category="entry",
+                    )
+
+                    if result.passed:
+                        register_filter(
+                            name=generated.filter_name,
+                            file_path=result.filter_file,
+                            class_name=generated.filter_class_name,
+                        )
+                        logger.info(
+                            "Codegen: registered new edge filter %s",
+                            generated.filter_name,
+                        )
+                    else:
+                        logger.info(
+                            "Codegen: filter %s failed stage %s",
+                            generated.filter_name, result.failed_stage,
+                        )
+                except Exception as exc:
+                    logger.debug("Codegen: skipped rule %s: %s", rule.get("condition", "?"), exc)
+        except Exception as exc:
+            logger.debug("Codegen pipeline unavailable: %s", exc)
 
     # ------------------------------------------------------------------
     # Full loop

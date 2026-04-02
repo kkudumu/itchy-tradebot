@@ -180,7 +180,6 @@ def train_classifier(
 # SHAP interaction analysis
 # ---------------------------------------------------------------------------
 
-import shap
 from dataclasses import dataclass, field
 
 
@@ -210,6 +209,8 @@ def run_shap_analysis(
 
     Returns SHAPInsight with importance, interactions, and rules.
     """
+    import shap  # lazy import: shap's cv2 dep has ABI issues with NumPy 2.x
+
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X)
 
