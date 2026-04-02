@@ -172,3 +172,100 @@ class TestHeadAndShoulders:
         detector = PatternDetector(atr=5.0)
         patterns = detector.detect_head_and_shoulders(swings)
         assert len(patterns) == 0
+
+
+class TestTriangles:
+    def test_detects_ascending_triangle(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Ascending triangle: flat highs, rising lows
+        swings = [
+            _make_swing(2050.0, "high", index=10),
+            _make_swing(2030.0, "low", index=15),
+            _make_swing(2050.5, "high", index=25),
+            _make_swing(2035.0, "low", index=30),     # higher low
+            _make_swing(2051.0, "high", index=40),
+            _make_swing(2040.0, "low", index=45),     # higher low
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_triangles(swings)
+
+        assert any(p.pattern_type == "ascending_triangle" for p in patterns)
+
+    def test_detects_descending_triangle(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Descending triangle: flat lows, falling highs
+        swings = [
+            _make_swing(2050.0, "high", index=10),
+            _make_swing(2020.0, "low", index=15),
+            _make_swing(2045.0, "high", index=25),     # lower high
+            _make_swing(2020.5, "low", index=30),
+            _make_swing(2040.0, "high", index=40),     # lower high
+            _make_swing(2019.5, "low", index=45),
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_triangles(swings)
+
+        assert any(p.pattern_type == "descending_triangle" for p in patterns)
+
+    def test_detects_symmetrical_triangle(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Symmetrical: lower highs AND higher lows
+        swings = [
+            _make_swing(2055.0, "high", index=10),
+            _make_swing(2025.0, "low", index=15),
+            _make_swing(2050.0, "high", index=25),     # lower high
+            _make_swing(2030.0, "low", index=30),      # higher low
+            _make_swing(2045.0, "high", index=40),     # lower high
+            _make_swing(2035.0, "low", index=45),      # higher low
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_triangles(swings)
+
+        assert any(p.pattern_type == "symmetrical_triangle" for p in patterns)
+
+
+class TestWedges:
+    def test_detects_rising_wedge(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Rising wedge: higher highs AND higher lows, converging
+        swings = [
+            _make_swing(2040.0, "high", index=10),
+            _make_swing(2020.0, "low", index=15),
+            _make_swing(2050.0, "high", index=25),     # higher high
+            _make_swing(2035.0, "low", index=30),      # higher low (bigger move)
+            _make_swing(2055.0, "high", index=40),     # higher high
+            _make_swing(2045.0, "low", index=45),      # higher low (bigger move)
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_wedges(swings)
+
+        assert any(p.pattern_type == "rising_wedge" for p in patterns)
+
+    def test_detects_falling_wedge(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        # Falling wedge: lower highs AND lower lows, converging
+        swings = [
+            _make_swing(2060.0, "high", index=10),
+            _make_swing(2040.0, "low", index=15),
+            _make_swing(2050.0, "high", index=25),     # lower high
+            _make_swing(2035.0, "low", index=30),      # lower low (smaller drop)
+            _make_swing(2045.0, "high", index=40),     # lower high
+            _make_swing(2032.0, "low", index=45),      # lower low (smaller drop)
+        ]
+        detector = PatternDetector(atr=5.0)
+        patterns = detector.detect_wedges(swings)
+
+        assert any(p.pattern_type == "falling_wedge" for p in patterns)
+
+    def test_needs_minimum_swings(self):
+        from src.discovery.chart_patterns import PatternDetector
+
+        detector = PatternDetector(atr=5.0)
+        swings = [_make_swing(2050.0, "high", index=10)]
+        assert detector.detect_wedges(swings) == []
+        assert detector.detect_triangles(swings) == []
