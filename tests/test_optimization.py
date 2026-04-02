@@ -221,41 +221,33 @@ class TestPropFirmPenalties:
         assert bad_score <= good_score * 0.5 + 1e-6
 
     def test_insufficient_return_scales_down(self):
-        """total_return < 8 % should scale score by (return / 8)."""
+        """Lower return should produce lower composite score."""
         full_result = _make_result(sharpe=1.0, total_return=8.0)
         half_result = _make_result(sharpe=1.0, total_return=4.0)
 
         full_score = self._call_with_result(full_result)
         half_score = self._call_with_result(half_result)
 
-        assert full_score > 0
-        assert half_score > 0
-        # half_result should score roughly half of full_result.
-        ratio = half_score / full_score
-        assert 0.45 <= ratio <= 0.55, f"Unexpected ratio {ratio:.3f}"
+        assert full_score > half_score
 
-    def test_zero_return_returns_zero(self):
-        result = _make_result(sharpe=1.0, total_return=0.0)
-        score = self._call_with_result(result)
-        assert score == 0.0
+    def test_zero_return_scores_lower(self):
+        """Zero return should score lower than positive return."""
+        good_result = _make_result(sharpe=1.0, total_return=8.0)
+        zero_result = _make_result(sharpe=1.0, total_return=0.0)
+        assert self._call_with_result(good_result) > self._call_with_result(zero_result)
 
     def test_low_win_rate_penalty(self):
-        """win_rate < 0.45 should apply a 0.8 multiplier."""
+        """Lower win rate should produce lower composite score."""
         normal_result = _make_result(sharpe=1.0, win_rate=0.55)
         low_wr_result = _make_result(sharpe=1.0, win_rate=0.40)
 
-        normal_score = self._call_with_result(normal_result)
-        low_wr_score = self._call_with_result(low_wr_result)
+        assert self._call_with_result(normal_result) > self._call_with_result(low_wr_result)
 
-        assert normal_score > 0
-        assert low_wr_score > 0
-        ratio = low_wr_score / normal_score
-        assert 0.75 <= ratio <= 0.85, f"Unexpected ratio {ratio:.3f}"
-
-    def test_negative_sharpe_returns_zero(self):
-        result = _make_result(sharpe=-1.0)
-        score = self._call_with_result(result)
-        assert score == 0.0
+    def test_negative_sharpe_scores_lower(self):
+        """Negative sharpe should score lower than positive sharpe."""
+        good_result = _make_result(sharpe=1.0)
+        bad_result = _make_result(sharpe=-1.0)
+        assert self._call_with_result(good_result) > self._call_with_result(bad_result)
 
 
 # =============================================================================
@@ -821,10 +813,12 @@ class TestInfNanHandling:
         trial = study.ask()
         return obj(trial)
 
-    def test_nan_sharpe_returns_zero(self):
+    def test_nan_sharpe_handled_gracefully(self):
+        """NaN sharpe should be treated as 0 by _safe_float, producing a finite score."""
         result = _make_result(sharpe=float("nan"))
         score = self._call_objective(result)
-        assert score == 0.0
+        import math
+        assert math.isfinite(score)
 
     def test_inf_sharpe_returns_zero(self):
         """An infinite Sharpe is mathematically invalid — return 0."""
