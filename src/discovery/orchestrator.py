@@ -531,3 +531,16 @@ class DiscoveryOrchestrator:
         # Remove evaluated edges
         for idx in reversed(to_remove):
             pending_edges.pop(idx)
+
+    # ------------------------------------------------------------------
+    # Dashboard integration
+    # ------------------------------------------------------------------
+
+    def get_dashboard_payload(self) -> Dict[str, Any]:
+        """Build a payload for the OptimizationDashboardServer.
+
+        Returns a dict with discovery findings formatted for the
+        Optimization tab.
+        """
+        self._init_components()
+        return self._report_gen.get_dashboard_payload()

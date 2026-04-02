@@ -101,6 +101,8 @@ def _make_handler(reports_dir: Path, live_dashboard: Optional[Any] = None):
                 self._serve_candles(parse_qs(parsed.query))
             elif path == "/api/trades":
                 self._serve_trades(parse_qs(parsed.query))
+            elif path == "/api/discovery-state":
+                self._serve_discovery_state()
             # Legacy endpoint alias
             elif path == "/api/state":
                 self._serve_opt_state()
@@ -204,6 +206,20 @@ def _make_handler(reports_dir: Path, live_dashboard: Optional[Any] = None):
             else:
                 data = {"trades": [], "next_index": 0}
             self._send_json(data)
+
+        # ---- Discovery state ----
+
+        def _serve_discovery_state(self):
+            """Serve discovery agent findings for the dashboard."""
+            from src.discovery.window_report import WindowReportGenerator
+
+            reports_dir = str(self._reports / "discovery")
+            try:
+                gen = WindowReportGenerator(reports_dir=reports_dir)
+                payload = gen.get_dashboard_payload()
+                self._send_json(payload)
+            except Exception as exc:
+                self._send_json({"discovery": {}, "error": str(exc)})
 
         # ---- HTML ----
 

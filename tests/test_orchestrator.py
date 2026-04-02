@@ -358,3 +358,47 @@ class TestRunLoop:
         # Check that summary report file was written
         summary_path = Path(reports_dir) / "discovery_summary.json"
         assert summary_path.exists()
+
+
+class TestDashboardIntegration:
+    def test_orchestrator_exposes_dashboard_payload(self):
+        from src.discovery.orchestrator import DiscoveryOrchestrator
+
+        candles = _make_candles(n_days=22)
+        kb_dir = str(Path(tempfile.mkdtemp()) / "kb")
+        reports_dir = str(Path(tempfile.mkdtemp()) / "reports")
+
+        orch = DiscoveryOrchestrator(
+            config={
+                "orchestrator": {"window_size_trading_days": 22},
+                "reporting": {"reports_dir": reports_dir, "dashboard_integration": True},
+            },
+            knowledge_dir=kb_dir,
+        )
+
+        with patch("src.discovery.orchestrator.IchimokuBacktester") as MockBT:
+            mock_result = MagicMock()
+            mock_result.trades = [{"r_multiple": 1.0, "risk_pct": 1.0, "context": {}, "day_index": 0}]
+            mock_result.metrics = {"win_rate": 0.50, "total_trades": 1}
+            mock_result.prop_firm = {"status": "ongoing"}
+            MockBT.return_value.run.return_value = mock_result
+
+            orch.run(candles)
+
+        payload = orch.get_dashboard_payload()
+        assert "discovery" in payload
+        assert "total_windows" in payload["discovery"]
+
+    def test_dashboard_api_endpoint_serves_discovery_state(self):
+        from src.discovery.window_report import WindowReportGenerator
+
+        reports_dir = str(Path(tempfile.mkdtemp()) / "reports")
+        gen = WindowReportGenerator(reports_dir=reports_dir)
+
+        gen.generate_window_report(
+            window_id="w_000", window_index=0, trades=[], metrics={},
+            challenge_result={"passed_phase_1": False, "passed_phase_2": False},
+        )
+
+        payload = gen.get_dashboard_payload()
+        assert payload["discovery"]["total_windows"] == 1
