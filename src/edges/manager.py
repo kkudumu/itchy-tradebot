@@ -27,6 +27,7 @@ from .time_stop import TimeStopFilter
 from .bb_squeeze import BBSqueezeAmplifier
 from .confluence_scoring import ConfluenceScoringFilter
 from .equity_curve import EquityCurveFilter
+from src.macro.event_proximity import EventProximityFilter
 
 
 # Mapping from config key → (constructor, category)
@@ -44,6 +45,7 @@ _REGISTRY: dict[str, tuple[type[EdgeFilter], str]] = {
     "bb_squeeze":                (BBSqueezeAmplifier,             "modifier"),
     "confluence_scoring":        (ConfluenceScoringFilter,        "entry+modifier"),
     "equity_curve":              (EquityCurveFilter,              "modifier"),
+    "event_proximity":           (EventProximityFilter,            "entry"),
 }
 
 

@@ -91,6 +91,13 @@ equity_curve:
     lookback_trades: 20        # Rolling window of closed trades
     reduced_size_multiplier: 0.5
 
+# 13. Event proximity — block entries near NFP, FOMC, CPI releases
+event_proximity:
+  enabled: false
+  params:
+    hours_before: 4
+    hours_after: 2
+
 # Trading costs — deducted from P&L per trade (round-turn)
 trading_costs:
   commission_per_lot: 4.00     # USD per standard lot, round-turn (The5ers High Stakes)
@@ -114,3 +121,7 @@ strategy_profiles:
       enabled: false
     news_filter:
       enabled: false
+    event_proximity:
+      enabled: true
+      hours_before: 4
+      hours_after: 2

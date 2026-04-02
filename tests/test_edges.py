@@ -918,9 +918,9 @@ class TestEdgeManager:
         assert "EdgeManager" in r
 
     def test_entry_edge_count(self):
-        # 8 entry edges: 7 pure entry + confluence_scoring (dual entry+modifier)
+        # 9 entry edges: 7 pure entry + confluence_scoring (dual entry+modifier) + event_proximity
         manager = self._manager()
-        assert len(manager.entry_edges) == 8
+        assert len(manager.entry_edges) == 9
 
     def test_exit_edge_count(self):
         # 2 exit edges: friday_close, time_stop
