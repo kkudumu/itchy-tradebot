@@ -96,3 +96,49 @@ class KnowledgeBase:
             trades = json.loads(p.read_text(encoding="utf-8"))
             all_trades.extend(trades)
         return all_trades
+
+    # -- Regime Stats --
+
+    def save_regime_stats(self, stats: Dict[str, Any], window_id: str) -> Path:
+        """Persist per-regime trade statistics for a window."""
+        regime_dir = self._base / "regime_stats"
+        regime_dir.mkdir(parents=True, exist_ok=True)
+        path = regime_dir / f"{window_id}.json"
+        path.write_text(json.dumps(stats, indent=2, default=str), encoding="utf-8")
+        return path
+
+    def load_regime_stats(self, window_id: str) -> Dict[str, Any]:
+        """Load regime stats for a specific window."""
+        path = self._base / "regime_stats" / f"{window_id}.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def list_regime_stats(self) -> List[Dict[str, Any]]:
+        """List all saved regime stats across windows."""
+        regime_dir = self._base / "regime_stats"
+        if not regime_dir.exists():
+            return []
+        results = []
+        for p in sorted(regime_dir.glob("*.json")):
+            stats = json.loads(p.read_text(encoding="utf-8"))
+            stats["_window_id"] = p.stem
+            results.append(stats)
+        return results
+
+    # -- Macro Panel Summaries --
+
+    def save_macro_summary(self, summary: Dict[str, Any], window_id: str) -> Path:
+        """Persist macro panel summary for a window."""
+        macro_dir = self._base / "macro_summaries"
+        macro_dir.mkdir(parents=True, exist_ok=True)
+        path = macro_dir / f"{window_id}.json"
+        path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        return path
+
+    def load_macro_summary(self, window_id: str) -> Dict[str, Any]:
+        """Load macro panel summary for a specific window."""
+        path = self._base / "macro_summaries" / f"{window_id}.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
