@@ -174,3 +174,117 @@ def train_classifier(
     model = xgb.XGBClassifier(**{**model.get_params(), "n_estimators": best_n_estimators})
     model.fit(X, y, sample_weight=sample_weight, verbose=False)
     return model
+
+
+# ---------------------------------------------------------------------------
+# SHAP interaction analysis
+# ---------------------------------------------------------------------------
+
+import shap
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SHAPInsight:
+    """Results of SHAP analysis on the trade classifier."""
+    feature_importance: Dict[str, float] = field(default_factory=dict)
+    top_interactions: List[Tuple[Tuple[str, str], float]] = field(default_factory=list)
+    actionable_rules: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def run_shap_analysis(
+    model: xgb.XGBClassifier,
+    X: pd.DataFrame,
+    y: pd.Series,
+    y_r: pd.Series,
+    top_k_features: int = 15,
+    top_k_interactions: int = 10,
+    min_trades_per_bucket: int = 10,
+) -> SHAPInsight:
+    """Run SHAP feature importance + interaction analysis.
+
+    1. Computes per-feature mean |SHAP| (global importance).
+    2. Computes SHAP interaction values to find feature PAIRS.
+    3. Splits data into quadrants per interaction pair and extracts
+       actionable rules where quadrant win rate deviates from baseline.
+
+    Returns SHAPInsight with importance, interactions, and rules.
+    """
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+
+    # Feature importance (sorted descending)
+    mean_abs = np.abs(shap_values).mean(axis=0)
+    importance = dict(zip(X.columns.tolist(), mean_abs.tolist()))
+    sorted_importance = dict(
+        sorted(importance.items(), key=lambda x: x[1], reverse=True)[:top_k_features]
+    )
+
+    # Interaction values
+    shap_interaction = explainer.shap_interaction_values(X)
+    mean_inter = np.abs(shap_interaction).mean(axis=0)
+    np.fill_diagonal(mean_inter, 0)
+
+    cols = X.columns.tolist()
+    pairs: List[Tuple[Tuple[str, str], float]] = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            strength = float(mean_inter[i, j] + mean_inter[j, i])
+            if strength > 0.001:
+                pairs.append(((cols[i], cols[j]), strength))
+    pairs.sort(key=lambda x: x[1], reverse=True)
+    top_interactions = pairs[:top_k_interactions]
+
+    # Extract rules from top interactions
+    baseline_wr = float(y.mean())
+    rules: List[Dict[str, Any]] = []
+
+    for (feat_a, feat_b), strength in top_interactions:
+        col_a, col_b = X[feat_a], X[feat_b]
+        thresh_a = 0.5 if col_a.nunique() <= 3 else float(col_a.median())
+        thresh_b = 0.5 if col_b.nunique() <= 3 else float(col_b.median())
+
+        quadrants = {
+            f"{feat_a}>={thresh_a:.2f} AND {feat_b}>={thresh_b:.2f}": (col_a >= thresh_a) & (col_b >= thresh_b),
+            f"{feat_a}>={thresh_a:.2f} AND {feat_b}<{thresh_b:.2f}": (col_a >= thresh_a) & (col_b < thresh_b),
+            f"{feat_a}<{thresh_a:.2f} AND {feat_b}>={thresh_b:.2f}": (col_a < thresh_a) & (col_b >= thresh_b),
+            f"{feat_a}<{thresh_a:.2f} AND {feat_b}<{thresh_b:.2f}": (col_a < thresh_a) & (col_b < thresh_b),
+        }
+
+        for cond_str, mask in quadrants.items():
+            n_in = int(mask.sum())
+            if n_in < min_trades_per_bucket:
+                continue
+            quad_wr = float(y[mask].mean())
+            quad_avg_r = float(y_r[mask].mean())
+            if abs(quad_wr - baseline_wr) < 0.05:
+                continue
+            lift = quad_wr / baseline_wr if baseline_wr > 0 else 0.0
+
+            if quad_wr >= baseline_wr * 1.3 and n_in >= 15:
+                rec = "strong_filter"
+            elif quad_wr >= baseline_wr * 1.15 or quad_wr <= baseline_wr * 0.7:
+                rec = "weak_filter"
+            else:
+                rec = "informational"
+
+            rules.append({
+                "feature_a": feat_a,
+                "feature_b": feat_b,
+                "condition": cond_str,
+                "quadrant_win_rate": round(quad_wr, 4),
+                "quadrant_avg_r": round(quad_avg_r, 4),
+                "baseline_win_rate": round(baseline_wr, 4),
+                "n_trades": n_in,
+                "lift": round(lift, 3),
+                "interaction_strength": round(strength, 4),
+                "recommendation": rec,
+            })
+
+    rules.sort(key=lambda r: r["lift"], reverse=True)
+
+    return SHAPInsight(
+        feature_importance=sorted_importance,
+        top_interactions=top_interactions,
+        actionable_rules=rules,
+    )

@@ -123,3 +123,50 @@ class TestTrainClassifier:
         # Model should be aware of class imbalance
         params = model.get_params()
         assert params["scale_pos_weight"] > 1.0
+
+
+from dataclasses import fields as dc_fields
+
+
+class TestSHAPAnalysis:
+    def _train_model(self, n=60):
+        from src.discovery.xgb_analyzer import train_classifier
+        rng = np.random.default_rng(42)
+        X = pd.DataFrame(rng.random((n, 64)), columns=[f"f{i}" for i in range(64)])
+        y = pd.Series(rng.choice([0, 1], n, p=[0.63, 0.37]))
+        y_r = pd.Series(np.where(y == 1, rng.uniform(0.5, 3.0, n), rng.uniform(-2.0, -0.1, n)))
+        model = train_classifier(X, y, y_r)
+        return model, X, y, y_r
+
+    def test_returns_shap_insight(self):
+        from src.discovery.xgb_analyzer import run_shap_analysis, SHAPInsight
+
+        model, X, y, y_r = self._train_model()
+        insight = run_shap_analysis(model, X, y, y_r)
+
+        assert isinstance(insight, SHAPInsight)
+        assert len(insight.feature_importance) > 0
+        assert isinstance(insight.top_interactions, list)
+        assert isinstance(insight.actionable_rules, list)
+
+    def test_feature_importance_sorted_descending(self):
+        from src.discovery.xgb_analyzer import run_shap_analysis
+
+        model, X, y, y_r = self._train_model()
+        insight = run_shap_analysis(model, X, y, y_r)
+
+        values = list(insight.feature_importance.values())
+        assert values == sorted(values, reverse=True)
+
+    def test_rules_have_required_keys(self):
+        from src.discovery.xgb_analyzer import run_shap_analysis
+
+        model, X, y, y_r = self._train_model(n=100)
+        insight = run_shap_analysis(model, X, y, y_r)
+
+        required_keys = {
+            "feature_a", "feature_b", "condition", "quadrant_win_rate",
+            "baseline_win_rate", "n_trades", "lift", "recommendation",
+        }
+        for rule in insight.actionable_rules:
+            assert required_keys.issubset(rule.keys()), f"Missing keys: {required_keys - rule.keys()}"
