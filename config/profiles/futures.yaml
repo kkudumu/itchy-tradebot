@@ -1,0 +1,19 @@
+# Futures profile defaults.
+# Applied to every instrument with class: futures in instruments.yaml.
+# Per-instrument values override these.
+
+instrument_class: futures
+
+# Cost model — round-trip commission per contract, slippage in ticks
+default_commission_per_contract_round_trip: 1.40
+default_slippage_ticks: 1
+
+# Daily reset at 5pm America/Chicago matches TopstepX and CME conventions
+daily_reset_hour: 17
+daily_reset_tz: "America/Chicago"
+
+# Futures regular trading session window (CME electronic hours)
+session_open_local: "17:00"
+session_close_local: "16:00"
+# CME has a 1h maintenance break each day at 16:00 CT
+maintenance_window_minutes: 60

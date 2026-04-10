@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.config.profile import InstrumentClass, ProfileConfig, load_profile
 
 
 # ---------------------------------------------------------------------------
@@ -330,14 +332,41 @@ class DatabaseConfig(BaseModel):
 
 
 class InstrumentOverride(BaseModel):
-    """Per-instrument parameter overrides applied on top of base strategy config."""
+    """Per-instrument parameter overrides applied on top of base strategy config.
+
+    The ``class_`` field (accepts ``class`` in YAML via alias) selects the
+    profile defaults loaded from ``config/profiles/<class>.yaml``. Futures
+    instruments must declare ``tick_size``, ``tick_value_usd``, and
+    ``contract_size`` — the ``model_validator`` enforces this so a misconfigured
+    YAML fails loudly at load time rather than producing silent zero-sizing
+    deep in the engine.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     symbol: str
+    class_: InstrumentClass = Field(
+        default=InstrumentClass.FOREX,
+        alias="class",
+        description="Instrument asset class (forex | futures) — drives profile selection",
+    )
     provider: str | None = None
     contract_id: str | None = None
     symbol_id: str | None = None
+    # Common tick metadata (futures) / pip metadata (forex)
     tick_size: float | None = None
-    tick_value: float | None = None
+    tick_value: float | None = None  # legacy alias for tick_value_usd
+    tick_value_usd: float | None = None
+    contract_size: float | None = None
+    commission_per_contract_round_trip: float | None = None
+    session_open_ct: str | None = None
+    session_close_ct: str | None = None
+    daily_reset_hour_ct: int | None = None
+    # Forex-specific
+    pip_size: float | None = None
+    pip_value_per_lot: float | None = None
+    standard_lot_units: float | None = None
+    # Legacy / free-form fields kept for backward compatibility
     price_scale: float | None = None
     commission_per_contract: float | None = None
     default_quantity: int | None = None
@@ -346,6 +375,43 @@ class InstrumentOverride(BaseModel):
     spread_max_points: int | None = None
     atr_stop_multiplier: float | None = None
     pip_value_usd: float | None = None   # USD value of 1 pip/point per lot
+
+    @model_validator(mode="after")
+    def _backfill_and_validate_by_class(self) -> "InstrumentOverride":
+        # Backfill canonical aliases from legacy field names so downstream
+        # code can read tick_value_usd / pip_size without having to look at
+        # both sets of keys.
+        if self.tick_value_usd is None and self.tick_value is not None:
+            self.tick_value_usd = self.tick_value
+        if self.class_ == InstrumentClass.FOREX:
+            if self.pip_size is None and self.tick_size is not None:
+                self.pip_size = self.tick_size
+            if self.pip_value_per_lot is None and self.pip_value_usd is not None:
+                self.pip_value_per_lot = self.pip_value_usd
+
+        # Validate class-specific required fields. Futures must have the
+        # full tick/contract size triple so the sizer and cost model can
+        # convert risk dollars to contracts without guessing.
+        if self.class_ == InstrumentClass.FUTURES:
+            missing: list[str] = []
+            if self.tick_size is None or self.tick_size <= 0:
+                missing.append("tick_size")
+            if self.tick_value_usd is None or self.tick_value_usd <= 0:
+                missing.append("tick_value_usd")
+            if self.contract_size is None or self.contract_size <= 0:
+                missing.append("contract_size")
+            if missing:
+                raise ValueError(
+                    f"Futures instrument {self.symbol!r} is missing required "
+                    f"fields: {missing}. Set these in instruments.yaml "
+                    "(tick_size, tick_value_usd, contract_size)."
+                )
+        return self
+
+    @property
+    def profile(self) -> ProfileConfig:
+        """Lazily loaded profile defaults for this instrument's class."""
+        return load_profile(self.class_)
 
 
 class InstrumentsConfig(BaseModel):
@@ -403,3 +469,20 @@ class AppConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     instruments: InstrumentsConfig = Field(default_factory=InstrumentsConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
+    profiles: dict[InstrumentClass, ProfileConfig] = Field(
+        default_factory=dict,
+        description="Class-wide profile defaults keyed by InstrumentClass. "
+        "Populated by the loader from config/profiles/*.yaml.",
+    )
+
+    def profile_for(self, symbol: str) -> ProfileConfig | None:
+        """Return the profile defaults for the instrument *symbol*.
+
+        Looks up the instrument's ``class_`` in ``instruments`` and returns
+        the matching profile from ``profiles``. Returns ``None`` when the
+        symbol is unknown.
+        """
+        inst = self.instruments.get(symbol)
+        if inst is None:
+            return None
+        return self.profiles.get(inst.class_) or load_profile(inst.class_)
