@@ -131,5 +131,17 @@ prop_firm:
 #     max_loss_pct: 10.0
 #     daily_loss_pct: 5.0
 
+# ------------------------------------------------------------------
+# Strategy selector — two different fields read by two code paths:
+#   * active_strategy  (singular): legacy field read by
+#     src/strategy/loader.py for live mode. Leave as "ichimoku" so
+#     the live engine defaults to the original behavior.
+#   * active_strategies (plural): read by the multi-strategy
+#     dispatcher in src/backtesting/vectorbt_engine.py. Lists every
+#     strategy the backtest should blend.
+# ------------------------------------------------------------------
 active_strategies:
+  - ichimoku
+  - asian_breakout
+  - ema_pullback
   - sss
