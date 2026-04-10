@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.risk.instrument_sizer import InstrumentSizer
+
 
 @dataclass
 class PositionSize:
     """Result of a position size calculation."""
 
     lot_size: float
-    """Calculated lot size (clamped to broker limits)."""
+    """Calculated broker quantity (float lots for forex, integer contracts for futures)."""
 
     risk_pct: float
     """Risk percentage applied to this calculation."""
@@ -66,6 +68,7 @@ class AdaptivePositionSizer:
         phase_threshold_pct: float = 4.0,
         min_lot: float = 0.01,
         max_lot: float = 10.0,
+        instrument_sizer: InstrumentSizer | None = None,
     ) -> None:
         if initial_balance <= 0:
             raise ValueError(f"initial_balance must be positive, got {initial_balance}")
@@ -80,6 +83,11 @@ class AdaptivePositionSizer:
 
         self._min_lot = min_lot
         self._max_lot = max_lot
+        # Optional profile-aware sizer. When set, calculate_position_size
+        # delegates the final risk→quantity conversion to this adapter so
+        # futures runs return integer contracts instead of float lots.
+        # When None, the legacy forex lot formula is used.
+        self._instrument_sizer = instrument_sizer
 
     # ------------------------------------------------------------------ #
     # Public interface                                                      #
@@ -174,13 +182,26 @@ class AdaptivePositionSizer:
             stop_distance_override if stop_distance_override is not None else atr * atr_multiplier
         )
 
-        raw_lot = risk_amount / (stop_distance * point_value)
-
-        # Clamp to broker lot boundaries
-        lot_size = max(self._min_lot, min(raw_lot, self._max_lot))
+        if self._instrument_sizer is not None:
+            # Profile-aware path — the sizer handles forex/futures
+            # conversion and returns either a float lot count or an
+            # integer contract count.
+            qty: float | int = self._instrument_sizer.size_for_risk(
+                risk_usd=risk_amount,
+                stop_distance_price=stop_distance,
+            )
+            if isinstance(qty, int):
+                lot_size = float(qty)  # PositionSize.lot_size is float; caller can cast back
+            else:
+                lot_size = round(qty, 2)
+        else:
+            # Legacy forex path — same formula as before.
+            raw_lot = risk_amount / (stop_distance * point_value)
+            lot_size = max(self._min_lot, min(raw_lot, self._max_lot))
+            lot_size = round(lot_size, 2)
 
         return PositionSize(
-            lot_size=round(lot_size, 2),
+            lot_size=lot_size,
             risk_pct=risk_pct,
             risk_amount=risk_amount,
             stop_distance=stop_distance,
