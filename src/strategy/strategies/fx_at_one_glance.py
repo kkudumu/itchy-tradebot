@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..base import Strategy, EvalMatrix, EvalRequirement, ConfluenceResult
 from ..signal_engine import Signal
+from ..trading_modes.ichimoku_exit import IchimokuExitManager
 
 
 TF_MODES = {
@@ -67,8 +68,11 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
         reqs.append(EvalRequirement('divergence', [self._entry_tf]))
         self.required_evaluators = reqs
 
-        # Exit manager wired in Task 10
-        self.trading_mode = None
+        # Exit manager
+        self.trading_mode = IchimokuExitManager(
+            mode=self._exit_mode, entry_tf=self._entry_tf,
+            kijun_buffer=self._kijun_buffer, partial_close_pct=self._partial_pct,
+        )
 
     # --- 5-Point Checklist ---
     def _checklist_direction(self, matrix):
