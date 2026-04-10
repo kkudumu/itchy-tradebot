@@ -31,8 +31,10 @@ logger = logging.getLogger(__name__)
 _RESAMPLE_RULES: Dict[str, str] = {
     "5M":  "5min",
     "15M": "15min",
+    "30M": "30min",
     "1H":  "1h",
     "4H":  "4h",
+    "1D":  "1D",
 }
 
 _OHLCV_AGG = {

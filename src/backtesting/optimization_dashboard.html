@@ -404,6 +404,20 @@ tr.iter-row.selected { background: rgba(0,210,255,0.15); border-left: 3px solid 
     <div class="progress-bar"><div class="progress-fill" id="lv-progress" style="width:0%"></div></div>
   </div>
 
+  <div class="card" style="position:relative;">
+    <h3>Live Chart</h3>
+    <div id="live-tf-buttons" style="position:absolute;top:8px;right:12px;display:flex;gap:4px;">
+      <button class="live-tf-btn" data-tf="1m" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">1M</button>
+      <button class="live-tf-btn active" data-tf="5m" style="background:var(--accent);color:#000;border:none;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;font-weight:700;">5M</button>
+      <button class="live-tf-btn" data-tf="15m" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">15M</button>
+      <button class="live-tf-btn" data-tf="30m" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">30M</button>
+      <button class="live-tf-btn" data-tf="1h" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">1H</button>
+      <button class="live-tf-btn" data-tf="4h" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">4H</button>
+      <button class="live-tf-btn" data-tf="1d" style="background:var(--card);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">D</button>
+    </div>
+    <div id="live-chart-container" style="width:100%;height:400px;margin-top:4px;"></div>
+  </div>
+
   <div class="card">
     <h3>Equity Curve</h3>
     <canvas id="equity-canvas"></canvas>
@@ -524,6 +538,230 @@ tr.iter-row.selected { background: rgba(0,210,255,0.15); border-left: 3px solid 
 
 <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
+// ═══════ LIVE CANDLESTICK CHART ═══════
+const { createChart, CandlestickSeries, LineSeries } = LightweightCharts;
+
+const liveChartState = {
+  currentTf: '5m',
+  candleSince: { '1m': 0, '5m': 0, '15m': 0, '30m': 0, '1h': 0, '4h': 0, '1d': 0 },
+  candleData: { '1m': [], '5m': [], '15m': [], '30m': [], '1h': [], '4h': [], '1d': [] },
+  following: true,
+};
+
+const liveChartContainer = document.getElementById('live-chart-container');
+const liveChart = createChart(liveChartContainer, {
+  layout: { background: { color: '#0f0f23' }, textColor: '#888', fontSize: 11 },
+  grid: { vertLines: { color: '#1e1e35' }, horzLines: { color: '#1e1e35' } },
+  crosshair: { vertLine: { color: '#444', width: 1, style: 3 }, horzLine: { color: '#444', width: 1, style: 3 } },
+  rightPriceScale: { borderColor: '#333', scaleMargins: { top: 0.1, bottom: 0.1 } },
+  timeScale: { borderColor: '#333', timeVisible: true, secondsVisible: false },
+  handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
+  handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+});
+
+const lvCandleSeries = liveChart.addSeries(CandlestickSeries, {
+  upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
+  wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+});
+const lvTenkanSeries = liveChart.addSeries(LineSeries, {
+  color: '#e74c3c', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+});
+const lvKijunSeries = liveChart.addSeries(LineSeries, {
+  color: '#3498db', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+});
+const lvChikouSeries = liveChart.addSeries(LineSeries, {
+  color: '#2ecc71', lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+});
+const lvSenkouASeries = liveChart.addSeries(LineSeries, {
+  color: 'rgba(38,166,154,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+});
+const lvSenkouBSeries = liveChart.addSeries(LineSeries, {
+  color: 'rgba(239,83,80,0.5)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false,
+});
+
+// Ichimoku Cloud Primitive
+class LvCloudPrimitive {
+  constructor() { this._sA = []; this._sB = []; this._pv = [new LvCloudView(this)]; }
+  updateData(sA, sB) { this._sA = sA; this._sB = sB; }
+  paneViews() { return this._pv; }
+  priceAxisViews() { return []; }
+  timeAxisViews() { return []; }
+}
+class LvCloudView {
+  constructor(p) { this._p = p; }
+  zOrder() { return 'bottom'; }
+  renderer() {
+    return { draw: (target) => {
+      const p = this._p;
+      if (p._sA.length === 0 || p._sB.length === 0) return;
+      target.useBitmapCoordinateSpace((scope) => {
+        const ctx = scope.context;
+        const ts = liveChart.timeScale();
+        const ps = lvCandleSeries.priceToCoordinate.bind(lvCandleSeries);
+        const aM = new Map(p._sA.filter(x=>x.value!=null).map(x=>[x.time,x.value]));
+        const bM = new Map(p._sB.filter(x=>x.value!=null).map(x=>[x.time,x.value]));
+        const times = [...aM.keys()].filter(t=>bM.has(t)).sort((a,b)=>a-b);
+        if (times.length < 2) return;
+        ctx.save();
+        const pr = scope.pixelRatio;
+        // Green cloud
+        const gT = times.filter(t=>aM.get(t)>=bM.get(t));
+        if (gT.length > 1) {
+          ctx.beginPath(); let first=true;
+          for (const t of gT) { const x=ts.timeToCoordinate(t),y=ps(aM.get(t)); if(x===null||y===null) continue; if(first){ctx.moveTo(x*pr,y*pr);first=false;}else ctx.lineTo(x*pr,y*pr); }
+          for (let i=gT.length-1;i>=0;i--) { const t=gT[i],x=ts.timeToCoordinate(t),y=ps(bM.get(t)); if(x!==null&&y!==null) ctx.lineTo(x*pr,y*pr); }
+          ctx.closePath(); ctx.fillStyle='rgba(38,166,154,0.15)'; ctx.fill();
+        }
+        // Red cloud
+        const rT = times.filter(t=>bM.get(t)>aM.get(t));
+        if (rT.length > 1) {
+          ctx.beginPath(); let first=true;
+          for (const t of rT) { const x=ts.timeToCoordinate(t),y=ps(bM.get(t)); if(x===null||y===null) continue; if(first){ctx.moveTo(x*pr,y*pr);first=false;}else ctx.lineTo(x*pr,y*pr); }
+          for (let i=rT.length-1;i>=0;i--) { const t=rT[i],x=ts.timeToCoordinate(t),y=ps(aM.get(t)); if(x!==null&&y!==null) ctx.lineTo(x*pr,y*pr); }
+          ctx.closePath(); ctx.fillStyle='rgba(239,83,80,0.15)'; ctx.fill();
+        }
+        ctx.restore();
+      });
+    }};
+  }
+}
+const lvCloud = new LvCloudPrimitive();
+lvCandleSeries.attachPrimitive(lvCloud);
+
+function lvBuildSeries(candles) {
+  const cs=[], tk=[], kj=[], ch=[], sA=[], sB=[];
+  for (let i=0; i<candles.length; i++) {
+    const c=candles[i], t=c[0];
+    if (!t) continue;
+    cs.push({time:t, open:c[1], high:c[2], low:c[3], close:c[4]});
+    if (c[6]!=null&&c[6]!==0) tk.push({time:t,value:c[6]});
+    if (c[7]!=null&&c[7]!==0) kj.push({time:t,value:c[7]});
+    if (c[8]!=null&&c[8]!==0) sA.push({time:t,value:c[8]});
+    if (c[9]!=null&&c[9]!==0) sB.push({time:t,value:c[9]});
+    if (c[10]!=null&&c[10]!==0&&i>=26) ch.push({time:candles[i-26][0],value:c[10]});
+  }
+  if (candles.length>=2) {
+    const bi=candles[candles.length-1][0]-candles[candles.length-2][0];
+    const lt=candles[candles.length-1][0];
+    for (let k=1;k<=26;k++) {
+      const ft=lt+k*bi;
+      if (sA.length>0) sA.push({time:ft,value:sA[sA.length-1].value});
+      if (sB.length>0) sB.push({time:ft,value:sB[sB.length-1].value});
+    }
+  }
+  return {cs,tk,kj,ch,sA,sB};
+}
+
+function lvApplyData(candles) {
+  if (!candles||candles.length===0) return;
+  const {cs,tk,kj,ch,sA,sB}=lvBuildSeries(candles);
+  if (cs.length>0) lvCandleSeries.setData(cs);
+  if (tk.length>0) lvTenkanSeries.setData(tk);
+  if (kj.length>0) lvKijunSeries.setData(kj);
+  if (ch.length>0) lvChikouSeries.setData(ch);
+  if (sA.length>0) lvSenkouASeries.setData(sA);
+  if (sB.length>0) lvSenkouBSeries.setData(sB);
+  lvCloud.updateData(sA,sB);
+}
+
+function lvUpdateIncremental(newCandles) {
+  if (!newCandles||newCandles.length===0) return;
+  const {cs,tk,kj,ch,sA,sB}=lvBuildSeries(newCandles);
+  for (const b of cs) lvCandleSeries.update(b);
+  for (const b of tk) lvTenkanSeries.update(b);
+  for (const b of kj) lvKijunSeries.update(b);
+  for (const b of ch) lvChikouSeries.update(b);
+  for (const b of sA) lvSenkouASeries.update(b);
+  for (const b of sB) lvSenkouBSeries.update(b);
+  const allA=liveChartState.candleData[liveChartState.currentTf].filter(c=>c[8]!=null&&c[8]!==0).map(c=>({time:c[0],value:c[8]}));
+  const allB=liveChartState.candleData[liveChartState.currentTf].filter(c=>c[9]!=null&&c[9]!==0).map(c=>({time:c[0],value:c[9]}));
+  lvCloud.updateData(allA,allB);
+}
+
+// Timeframe switching
+document.querySelectorAll('.live-tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tf = btn.dataset.tf;
+    if (tf === liveChartState.currentTf) return;
+    liveChartState.currentTf = tf;
+    document.querySelectorAll('.live-tf-btn').forEach(b => {
+      const isActive = b.dataset.tf === tf;
+      b.style.background = isActive ? 'var(--accent)' : 'var(--card)';
+      b.style.color = isActive ? '#000' : 'var(--muted)';
+      b.style.fontWeight = isActive ? '700' : 'normal';
+      b.style.border = isActive ? 'none' : '1px solid var(--border)';
+    });
+    const data = liveChartState.candleData[tf];
+    if (data && data.length > 0) {
+      lvApplyData(data);
+    } else {
+      lvCandleSeries.setData([]);
+      lvTenkanSeries.setData([]);
+      lvKijunSeries.setData([]);
+      lvChikouSeries.setData([]);
+      lvSenkouASeries.setData([]);
+      lvSenkouBSeries.setData([]);
+    }
+  });
+});
+
+// Chart resize
+function resizeLiveChart() {
+  const rect = liveChartContainer.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) liveChart.resize(rect.width, rect.height);
+}
+new ResizeObserver(() => resizeLiveChart()).observe(liveChartContainer);
+resizeLiveChart();
+
+// Candle polling
+async function pollLiveCandles() {
+  try {
+    const tf = liveChartState.currentTf;
+    const since = liveChartState.candleSince[tf];
+    const res = await fetch(`/api/candles?tf=${tf}&since=${since}`);
+    const newCandles = await res.json();
+    if (!newCandles || newCandles.length === 0) return;
+    const buf = liveChartState.candleData[tf];
+    if (since === 0 && buf.length === 0) {
+      liveChartState.candleData[tf] = newCandles;
+      lvApplyData(newCandles);
+    } else {
+      for (const c of newCandles) buf.push(c);
+      lvUpdateIncremental(newCandles);
+    }
+    liveChartState.candleSince[tf] = newCandles[newCandles.length - 1][0];
+    if (liveChartState.following) liveChart.timeScale().scrollToRealTime();
+  } catch(e) {}
+}
+
+// Background polling for non-active timeframes
+async function pollOtherLiveTfs() {
+  const tfs = ['1m','5m','15m','30m','1h','4h','1d'];
+  for (const tf of tfs) {
+    if (tf === liveChartState.currentTf) continue;
+    try {
+      const since = liveChartState.candleSince[tf];
+      const res = await fetch(`/api/candles?tf=${tf}&since=${since}`);
+      const newCandles = await res.json();
+      if (!newCandles || newCandles.length === 0) continue;
+      const buf = liveChartState.candleData[tf];
+      for (const c of newCandles) buf.push(c);
+      liveChartState.candleSince[tf] = newCandles[newCandles.length - 1][0];
+    } catch(e) {}
+  }
+}
+setInterval(pollLiveCandles, 500);
+setInterval(pollOtherLiveTfs, 5000);
+
+// Pause auto-follow when user interacts with chart
+liveChartContainer.addEventListener('mousedown', () => { liveChartState.following = false; });
+liveChartContainer.addEventListener('wheel', () => { liveChartState.following = false; });
+// Double-click to resume follow
+liveChartContainer.addEventListener('dblclick', () => {
+  liveChartState.following = true;
+  liveChart.timeScale().scrollToRealTime();
+});
+
 // ── Tab switching ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -531,6 +769,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'live') resizeLiveChart();
   });
 });
 
@@ -601,7 +840,12 @@ async function pollLive() {
     const pct = d.pct_complete || 0;
     document.getElementById('lv-progress').style.width = pct.toFixed(1) + '%';
     document.getElementById('lv-pct').textContent = pct.toFixed(1) + '%';
-    document.getElementById('lv-bar-info').textContent = `Bar ${d.bar_index || 0} / ${d.total_bars || 0}`;
+    let barText = `Bar ${d.bar_index || 0} / ${d.total_bars || 0}`;
+    if (d.current_timestamp) {
+      const ts = d.current_timestamp.replace('T', ' ').slice(0, 19);
+      barText += `  ·  ${ts}`;
+    }
+    document.getElementById('lv-bar-info').textContent = barText;
 
     // Equity history for chart
     if (d.equity_history && d.equity_history.length > 0) {

@@ -106,7 +106,7 @@ class _CandleBuffer:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._candles: Dict[str, List[list]] = {
-            "5m": [], "15m": [], "1h": [], "4h": [],
+            "1m": [], "5m": [], "15m": [], "30m": [], "1h": [], "4h": [], "1d": [],
         }
         self._trades: List[dict] = []
 
