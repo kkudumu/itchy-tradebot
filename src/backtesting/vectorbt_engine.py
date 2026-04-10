@@ -560,6 +560,22 @@ class IchimokuBacktester:
                         _sig.strategy_name = _sn
                         _bar_strategy_signals.append(_sig)
                         _pipeline_counts["signals_generated"] += 1
+                        # Telemetry: emit signal_generated for downstream analysis
+                        try:
+                            self.telemetry.emit_signal_generated(
+                                ts,
+                                _sn,
+                                direction=getattr(_sig, "direction", None),
+                                price=getattr(_sig, "entry_price", None) or close,
+                                atr=float(row_5m.get("atr", 0.0) or 0.0),
+                                adx=float(row_5m.get("adx", 0.0) or 0.0),
+                                confluence_score=float(
+                                    getattr(_sig, "confluence_score", 0) or 0
+                                ),
+                                pattern_type=getattr(_sig, "pattern_type", None),
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -809,6 +825,17 @@ class IchimokuBacktester:
                                     active_context = active_trades[trade_id]["context"]
                                     candles_since_entry = 0
                                     _pipeline_counts["signals_entered"] += 1
+                                    # Telemetry: emit entered event
+                                    try:
+                                        self.telemetry.emit_entry(
+                                            ts,
+                                            _strat_name or "ichimoku",
+                                            direction=signal.direction,
+                                            price=float(signal.entry_price),
+                                            planned_size=float(pos_size.lot_size),
+                                        )
+                                    except Exception:
+                                        pass
 
                                     # Entry screenshot
                                     if _screenshot_fn:
