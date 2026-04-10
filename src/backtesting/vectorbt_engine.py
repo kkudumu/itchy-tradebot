@@ -175,7 +175,7 @@ class IchimokuBacktester:
             position_sizer=sizer,
             circuit_breaker=breaker,
             exit_manager=exit_mgr,
-            max_concurrent=1,
+            max_concurrent=cfg.get("max_concurrent_positions", 3),
         )
 
         # Learning + logging components
@@ -242,7 +242,6 @@ class IchimokuBacktester:
         # Multi-strategy support
         from src.strategy.strategies.asian_breakout import AsianBreakoutStrategy
         from src.strategy.strategies.ema_pullback import EMAPullbackStrategy
-        from src.strategy.strategies.sss.strategy import SSSStrategy
         from src.strategy.signal_blender import SignalBlender
 
         active_strategy_names = cfg.get("active_strategies", ["ichimoku"])
@@ -258,17 +257,6 @@ class IchimokuBacktester:
             elif name == "ema_pullback":
                 ep_config = strategy_configs.get("ema_pullback", {})
                 self._active_strategies.append(("ema_pullback", EMAPullbackStrategy(config=ep_config)))
-            elif name == "sss":
-                sss_config = strategy_configs.get("sss", {})
-                self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
-
-        # SSS exit manager (SequenceExitMode) — used for SSS trades only
-        sss_strategy_cfg = strategy_configs.get("sss", {}) if isinstance(strategy_configs, dict) else {}
-        from src.strategy.strategies.sss.sequence_exit import SequenceExitMode as _SequenceExitMode
-        self._sss_exit_manager = _SequenceExitMode(
-            spread_multiplier=float(sss_strategy_cfg.get("spread_multiplier", 2.0)),
-            min_stop_pips=float(sss_strategy_cfg.get("min_stop_pips", 10.0)),
-        )
 
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
 
@@ -349,7 +337,11 @@ class IchimokuBacktester:
         equity_by_r: List[float] = []  # closed R-multiples for equity curve modifier
         learning_skipped: int = 0  # signals skipped by adaptive learning
 
-        # Active trade state
+        # Active trade state — supports multiple concurrent trades
+        # Each entry: {trade_id: {"trade": ActiveTrade, "signal": Signal,
+        #              "context": dict, "candles": int, "strategy": str}}
+        active_trades: Dict[int, dict] = {}
+        # Backwards-compat aliases (used by dashboard / end-of-data cleanup)
         active_trade_id: Optional[int] = None
         active_trade: Optional[ActiveTrade] = None
         active_signal: Optional[Signal] = None
@@ -451,12 +443,6 @@ class IchimokuBacktester:
                             ema_slow=float(row_5m.get("ema_slow", 0.0)),
                             atr=float(row_5m.get("atr", 0.0) or 0.0),
                         )
-                    elif _sn == "sss":
-                        _sig = _sobj.on_bar(
-                            ts, open=open_price, high=high, low=low, close=close,
-                            atr=float(row_5m.get("atr", 0.0) or 0.0),
-                            spread=float(row_5m.get("spread", 0.3)),
-                        )
                     else:
                         _sig = None
                     if _sig is not None:
@@ -467,25 +453,28 @@ class IchimokuBacktester:
                     pass
 
             # ------------------------------------------------------------------
-            # Manage open trade
+            # Manage ALL open trades (no longer blocks new entries)
             # ------------------------------------------------------------------
-            if active_trade_id is not None and active_trade is not None:
-                if _bar_strategy_signals:
-                    _pipeline_counts["signals_filtered_in_trade"] += len(_bar_strategy_signals)
-                candles_since_entry += 1
+            kijun_5m = float(row_5m.get("kijun", np.nan))
+            kijun_1h = htf_vals.get("kijun_1h", np.nan)
+            _closed_this_bar: List[int] = []
 
-                kijun_5m = float(row_5m.get("kijun", np.nan))
-                kijun_1h = htf_vals.get("kijun_1h", np.nan)
+            for _tid, _tstate in list(active_trades.items()):
+                _tobj = _tstate["trade"]
+                _tsig = _tstate["signal"]
+                _tctx = _tstate["context"]
+                _tcandles = _tstate["candles"] + 1
+                _tstate["candles"] = _tcandles
 
                 # Build edge context for exit checks
                 edge_ctx = self._build_edge_context(
                     ts=ts,
                     row_5m=row_5m,
                     htf_vals=htf_vals,
-                    active_trade=active_trade,
-                    candles_since_entry=candles_since_entry,
+                    active_trade=_tobj,
+                    candles_since_entry=_tcandles,
                     equity_by_r=equity_by_r,
-                    confluence_score=active_signal.confluence_score if active_signal else 0,
+                    confluence_score=_tsig.confluence_score if _tsig else 0,
                 )
 
                 # Check edge-based exit conditions (friday close, time stop)
@@ -497,12 +486,12 @@ class IchimokuBacktester:
                         "edge_exit",
                     )
                     trade_summary = self.trade_manager.close_trade(
-                        trade_id=active_trade_id,
+                        trade_id=_tid,
                         exit_price=close,
                         reason=exit_reason,
                     )
                     trade_summary = self._enrich_trade_summary(
-                        trade_summary, active_signal, active_context, instrument, balance
+                        trade_summary, _tsig, _tctx, instrument, balance
                     )
                     closed_trades.append(trade_summary)
                     _r = float(trade_summary.get("r_multiple") or 0.0)
@@ -510,117 +499,104 @@ class IchimokuBacktester:
                     if _r > 0: _n_wins += 1
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
-                    self._record_learning(trade_summary, active_context, enable_learning)
+                    self._record_learning(trade_summary, _tctx, enable_learning)
                     self.health_monitor.on_trade_closed(won=_r > 0)
                     if live_dashboard is not None:
                         self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                     if _screenshot_fn:
-                        _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
-                    active_trade_id = None
-                    active_trade = None
-                    active_signal = None
-                    active_context = None
-                    candles_since_entry = 0
+                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    _closed_this_bar.append(_tid)
+                    continue
 
-                else:
-                    # Route exit to SequenceExitMode for SSS trades, HybridExitManager otherwise
-                    _is_sss_trade = (
-                        active_signal is not None
-                        and getattr(active_signal, "strategy_name", None) == "sss"
+                # Check stop, partial exit, and trail via HybridExitManager
+                decision = self.trade_manager.update_trade(
+                    trade_id=_tid,
+                    current_price=close,
+                    kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
+                    higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
+                    bar_high=high,
+                    bar_low=low,
+                )
+
+                if decision.action == "full_exit":
+                    trade_summary = self.trade_manager.closed_trades[-1]
+                    trade_summary = self._enrich_trade_summary(
+                        dict(trade_summary), _tsig, _tctx, instrument, balance
                     )
-                    if _is_sss_trade:
-                        # Find the SSSStrategy instance to get its swing history
-                        _sss_obj = next(
-                            (obj for name, obj in self._active_strategies if name == "sss"),
-                            None,
-                        )
-                        _recent_swings = (
-                            _sss_obj._swing_history if _sss_obj is not None else []
-                        )
-                        _sss_spread = float(row_5m.get("spread", 0.3))
-                        decision = self._sss_exit_manager.check_exit(
-                            trade=active_trade,
-                            current_price=close,
-                            recent_swings=_recent_swings,
-                            spread=_sss_spread,
-                            bar_high=high,
-                            bar_low=low,
-                        )
-                        # Sync stop_loss change back into trade_manager's record
-                        if decision.action == "trail_update" and decision.new_stop is not None:
-                            active_trade.stop_loss = decision.new_stop
-                    else:
-                        # Check stop, partial exit, and trail via HybridExitManager
-                        # Pass bar high/low for realistic intrabar SL/TP checks
-                        decision = self.trade_manager.update_trade(
-                            trade_id=active_trade_id,
-                            current_price=close,
-                            kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
-                            higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
-                            bar_high=high,
-                            bar_low=low,
-                        )
+                    closed_trades.append(trade_summary)
+                    _r = float(trade_summary.get("r_multiple") or 0.0)
+                    equity_by_r.append(_r)
+                    if _r > 0: _n_wins += 1
+                    else: _n_losses += 1
+                    balance = self._update_balance_from_trade(balance, trade_summary)
+                    self._record_learning(trade_summary, _tctx, enable_learning)
+                    self.health_monitor.on_trade_closed(won=_r > 0)
+                    if live_dashboard is not None:
+                        self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                    if _screenshot_fn:
+                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    _closed_this_bar.append(_tid)
 
-                    if decision.action == "full_exit":
-                        if _is_sss_trade:
-                            # SSS exit manager does not archive via trade_manager; close explicitly
-                            exit_price = active_trade.stop_loss if decision.new_stop is None else close
-                            trade_summary = self.trade_manager.close_trade(
-                                trade_id=active_trade_id,
-                                exit_price=exit_price,
-                                reason=decision.reason or "sss_stop",
-                            )
-                        else:
-                            # Trade was archived in trade_manager by update_trade; retrieve the summary
-                            trade_summary = self.trade_manager.closed_trades[-1]
-                        trade_summary = self._enrich_trade_summary(
-                            dict(trade_summary), active_signal, active_context, instrument, balance
-                        )
-                        closed_trades.append(trade_summary)
-                        _r = float(trade_summary.get("r_multiple") or 0.0)
-                        equity_by_r.append(_r)
-                        if _r > 0: _n_wins += 1
-                        else: _n_losses += 1
-                        balance = self._update_balance_from_trade(balance, trade_summary)
-                        self._record_learning(trade_summary, active_context, enable_learning)
-                        self.health_monitor.on_trade_closed(won=_r > 0)
-                        if live_dashboard is not None:
-                            self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
-                        if _screenshot_fn:
-                            _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
-                        active_trade_id = None
-                        active_trade = None
-                        active_signal = None
-                        active_context = None
-                        candles_since_entry = 0
+                elif decision.action == "partial_exit":
+                    partial_pnl = self._partial_pnl(
+                        trade=_tobj,
+                        exit_price=close,
+                        close_pct=0.5,
+                    )
+                    balance += partial_pnl
+                    logger.debug(
+                        "Partial exit at bar %d: 50%% closed @ %.2f (R=%.2f), pnl=%.2f",
+                        bar_idx, close, decision.r_multiple, partial_pnl,
+                    )
 
-                    elif decision.action == "partial_exit":
-                        # 50% closed at 2R — log partial event to trade summary
-                        # The remaining 50% continues trailing; balance update is partial.
-                        partial_pnl = self._partial_pnl(
-                            trade=active_trade,
-                            exit_price=close,
-                            close_pct=0.5,
-                        )
-                        balance += partial_pnl
-                        logger.debug(
-                            "Partial exit at bar %d: 50%% closed @ %.2f (R=%.2f), pnl=%.2f",
-                            bar_idx, close, decision.r_multiple, partial_pnl,
-                        )
+            # Remove closed trades from active dict
+            for _tid in _closed_this_bar:
+                active_trades.pop(_tid, None)
+
+            # Keep legacy aliases in sync (for dashboard / end-of-data)
+            if active_trades:
+                _last_tid = max(active_trades)
+                active_trade_id = _last_tid
+                active_trade = active_trades[_last_tid]["trade"]
+                active_signal = active_trades[_last_tid]["signal"]
+                active_context = active_trades[_last_tid]["context"]
+                candles_since_entry = active_trades[_last_tid]["candles"]
+            else:
+                active_trade_id = None
+                active_trade = None
+                active_signal = None
+                active_context = None
+                candles_since_entry = 0
 
             # ------------------------------------------------------------------
-            # Look for new trade entry (only when flat)
+            # Look for new trade entries (runs even when trades are open)
             # ------------------------------------------------------------------
-            elif bar_idx >= _WARMUP_BARS:
+            if bar_idx >= _WARMUP_BARS:
+                # Track which strategies already have an open trade
+                _strategies_in_trade = {
+                    _ts["strategy"] for _ts in active_trades.values()
+                }
+
                 can_open, reason = self.trade_manager.can_open_trade(balance, instrument)
                 if can_open:
-                    # Use signals already collected from the state-update pass above
-                    all_signals: List[Signal] = list(_bar_strategy_signals)
+                    # Collect all signals
+                    all_signals: List[Signal] = []
+
+                    # Add strategy signals not already in a trade
+                    for _sig in _bar_strategy_signals:
+                        _sig_strat = getattr(_sig, "strategy_name", "unknown")
+                        if _sig_strat not in _strategies_in_trade:
+                            all_signals.append(_sig)
+                        else:
+                            _pipeline_counts["signals_filtered_in_trade"] += 1
+
                     cfg = self._config
 
-                    # Also try existing Ichimoku scanner (if ichimoku is active)
+                    # Also try Ichimoku scanner (if active and not already in trade)
                     active_names = [n for n, _ in self._active_strategies]
-                    if "ichimoku" in active_names or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]):
+                    if ("ichimoku" not in _strategies_in_trade
+                            and ("ichimoku" in active_names
+                                 or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]))):
                         ichi_signal = self._scan_for_signal(tf_data, bar_idx, instrument)
                         if ichi_signal is not None:
                             all_signals.append(ichi_signal)
@@ -701,20 +677,27 @@ class IchimokuBacktester:
                                         entry_time=ts,
                                     )
 
+                                    _strat_name = getattr(signal, "strategy_name", "ichimoku")
+                                    active_trades[trade_id] = {
+                                        "trade": trade_obj,
+                                        "signal": signal,
+                                        "context": self._build_entry_context(
+                                            signal=signal,
+                                            row_5m=row_5m,
+                                            htf_vals=htf_vals,
+                                            ts=ts,
+                                            risk_pct=pos_size.risk_pct,
+                                        ),
+                                        "candles": 0,
+                                        "strategy": _strat_name,
+                                    }
+                                    # Sync legacy aliases
                                     active_trade_id = trade_id
                                     active_trade = trade_obj
                                     active_signal = signal
+                                    active_context = active_trades[trade_id]["context"]
                                     candles_since_entry = 0
                                     _pipeline_counts["signals_entered"] += 1
-
-                                    # Capture entry context for embedding
-                                    active_context = self._build_entry_context(
-                                        signal=signal,
-                                        row_5m=row_5m,
-                                        htf_vals=htf_vals,
-                                        ts=ts,
-                                        risk_pct=pos_size.risk_pct,
-                                    )
 
                                     # Entry screenshot
                                     if _screenshot_fn:
@@ -722,10 +705,10 @@ class IchimokuBacktester:
 
                                     logger.debug(
                                         "Trade opened: %s %s @ %.2f SL=%.2f TP=%.2f "
-                                        "lots=%.2f risk=%.2f%%",
+                                        "lots=%.2f risk=%.2f%% strategy=%s",
                                         signal.direction, instrument, signal.entry_price,
                                         signal.stop_loss, signal.take_profit,
-                                        pos_size.lot_size, pos_size.risk_pct,
+                                        pos_size.lot_size, pos_size.risk_pct, _strat_name,
                                     )
                                 except RuntimeError as exc:
                                     logger.debug("Trade open rejected: %s", exc)
@@ -803,8 +786,30 @@ class IchimokuBacktester:
                     _safe_float(row_5m.get("senkou_b")),
                     _safe_float(row_5m.get("chikou")),
                 ])
+                # 1M candle push — push all 5 constituent 1M bars for this 5M bar
+                if "1M" in tf_data:
+                    tf_df_1m = tf_data["1M"]
+                    _start_1m = pd.Timestamp(ts_raw)
+                    _end_1m = _start_1m + pd.Timedelta(minutes=5)
+                    _m_slice = tf_df_1m.loc[(_start_1m <= tf_df_1m.index) & (tf_df_1m.index < _end_1m)]
+                    for _m_idx_ts, _m_row in _m_slice.iterrows():
+                        _m_unix = int(_m_idx_ts.timestamp())
+                        live_dashboard.append_candle("1m", [
+                            _m_unix,
+                            _safe_float(_m_row.get("open")),
+                            _safe_float(_m_row.get("high")),
+                            _safe_float(_m_row.get("low")),
+                            _safe_float(_m_row.get("close")),
+                            _safe_float(_m_row.get("volume", _m_row.get("tick_volume"))),
+                            _safe_float(_m_row.get("tenkan")),
+                            _safe_float(_m_row.get("kijun")),
+                            _safe_float(_m_row.get("senkou_a")),
+                            _safe_float(_m_row.get("senkou_b")),
+                            _safe_float(_m_row.get("chikou")),
+                        ])
+
                 # Higher timeframe candle push
-                for tf_key, tf_seconds in [("15M", 900), ("1H", 3600), ("4H", 14400)]:
+                for tf_key, tf_seconds in [("15M", 900), ("30M", 1800), ("1H", 3600), ("4H", 14400), ("1D", 86400)]:
                     if _time_val % tf_seconds == 0 and tf_key in tf_data:
                         tf_df = tf_data[tf_key]
                         mask = tf_df.index <= ts_raw
@@ -907,32 +912,35 @@ class IchimokuBacktester:
         )
 
         # ------------------------------------------------------------------
-        # Force-close any trade still open at end of data
+        # Force-close ALL trades still open at end of data
         # ------------------------------------------------------------------
-        if active_trade_id is not None and active_trade is not None and not df_5m.empty:
+        if active_trades and not df_5m.empty:
             final_row = df_5m.iloc[-1]
-            final_close = float(final_row.get("close", active_trade.entry_price))
-            trade_summary = self.trade_manager.close_trade(
-                trade_id=active_trade_id,
-                exit_price=final_close,
-                reason="end_of_data",
-            )
-            trade_summary = self._enrich_trade_summary(
-                trade_summary, active_signal, active_context, instrument, balance
-            )
-            closed_trades.append(trade_summary)
-            _r = float(trade_summary.get("r_multiple") or 0.0)
-            equity_by_r.append(_r)
-            if _r > 0: _n_wins += 1
-            else: _n_losses += 1
-            balance = self._update_balance_from_trade(balance, trade_summary)
-            self._record_learning(trade_summary, active_context, enable_learning)
-            self.health_monitor.on_trade_closed(won=_r > 0)
-            if live_dashboard is not None:
-                final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
-                if final_ts.tzinfo is None:
-                    final_ts = final_ts.replace(tzinfo=timezone.utc)
-                self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
+            final_close = float(final_row.get("close", 0.0))
+            final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
+            if final_ts.tzinfo is None:
+                final_ts = final_ts.replace(tzinfo=timezone.utc)
+
+            for _tid, _tstate in list(active_trades.items()):
+                trade_summary = self.trade_manager.close_trade(
+                    trade_id=_tid,
+                    exit_price=final_close,
+                    reason="end_of_data",
+                )
+                trade_summary = self._enrich_trade_summary(
+                    trade_summary, _tstate["signal"], _tstate["context"], instrument, balance
+                )
+                closed_trades.append(trade_summary)
+                _r = float(trade_summary.get("r_multiple") or 0.0)
+                equity_by_r.append(_r)
+                if _r > 0: _n_wins += 1
+                else: _n_losses += 1
+                balance = self._update_balance_from_trade(balance, trade_summary)
+                self._record_learning(trade_summary, _tstate["context"], enable_learning)
+                self.health_monitor.on_trade_closed(won=_r > 0)
+                if live_dashboard is not None:
+                    self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
+            active_trades.clear()
 
         # Signal live dashboard completion
         if live_dashboard is not None:
@@ -1046,15 +1054,18 @@ class IchimokuBacktester:
     def _push_trade_to_dashboard(live_dashboard, trade_summary: dict, ts: datetime, trade_id: int) -> None:
         """Push a completed trade to the live dashboard."""
         entry_time = trade_summary.get("entry_time", ts)
+        entry_iso = entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time)
+        exit_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
         live_dashboard.append_trade({
             "id": trade_id,
             "direction": trade_summary.get("direction", ""),
-            "entry_time": int(entry_time.timestamp()) if hasattr(entry_time, "timestamp") else 0,
-            "exit_time": int(ts.timestamp()),
+            "entry_time": entry_iso,
+            "exit_time": exit_iso,
             "entry_price": float(trade_summary.get("entry_price", 0)),
             "exit_price": float(trade_summary.get("exit_price", 0)),
             "r_multiple": float(trade_summary.get("r_multiple", 0)),
-            "pnl": float(trade_summary.get("pnl_points", 0)) * float(trade_summary.get("lot_size", 0)) * 100.0,
+            "pnl_points": float(trade_summary.get("pnl_points", 0)),
+            "original_stop": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "stop_loss": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "take_profit": float(trade_summary.get("take_profit", 0)),
             "exit_reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
