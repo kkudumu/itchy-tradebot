@@ -48,6 +48,65 @@ _BASE_KIJUN: int = 26
 _BASE_SENKOU_B: int = 52
 
 
+def topstep_combine_pass_score(result: object) -> float:
+    """Score a backtest result against TopstepX Combine pass rules.
+
+    Used as an Optuna objective when ``prop_firm.style ==
+    "topstep_combine_dollar"``. Returns a continuous value in roughly
+    [-2, 1] that Optuna can maximize:
+
+    * +1.0 if the run passed (status=="passed" from the active tracker)
+    * A scaled final-balance term in [-1, 1] plus style-specific
+      penalties when the run failed:
+        -0.5 for an MLL breach
+        -0.3 for a daily loss breach
+        -0.2 for a consistency failure
+
+    The result parameter is anything with a ``prop_firm`` dict — a
+    ``BacktestResult`` from :class:`IchimokuBacktester`, or a raw dict
+    shaped the same way.
+    """
+    prop = getattr(result, "prop_firm", None)
+    if prop is None and isinstance(result, dict):
+        prop = result.get("prop_firm")
+    if not prop:
+        return -1.0
+
+    # Find the active topstep snapshot — it lives under "active_tracker"
+    # when the legacy pct view is also present.
+    active = prop.get("active_tracker") if isinstance(prop, dict) else None
+    snap = active or prop
+
+    status = str(snap.get("status") or "").lower()
+    if status == "passed":
+        return 1.0
+
+    initial = float(snap.get("initial_balance") or 0.0)
+    current = float(snap.get("current_balance") or 0.0)
+    # Profit target — try the active tracker first, fall back to
+    # config-style fields or a sensible default.
+    target = float(
+        snap.get("profit_target_usd")
+        or snap.get("distance_to_target", 0.0) + (current - initial)
+        or 3_000.0
+    )
+    if target <= 0:
+        target = 3_000.0
+
+    balance_score = (current - initial) / target
+    balance_score = max(-1.0, min(1.0, balance_score))
+
+    penalty = 0.0
+    if status.startswith("failed_mll"):
+        penalty -= 0.5
+    elif status.startswith("failed_daily_loss"):
+        penalty -= 0.3
+    elif status.startswith("failed_consistency"):
+        penalty -= 0.2
+
+    return balance_score + penalty
+
+
 def _safe_float(value: object, default: float = 0.0) -> float:
     """Return a finite float from *value*, or *default* on NaN/None/inf."""
     if value is None:

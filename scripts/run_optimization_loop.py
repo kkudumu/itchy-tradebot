@@ -204,7 +204,25 @@ class OptimizationLoop:
             elif isinstance(result, dict):
                 challenge_sim = result.get("challenge_simulation")
 
-            current_pass_rate = challenge_sim.pass_rate if challenge_sim else 0.0
+            # Profile-aware scoring — topstep combines return a
+            # TopstepCombineResult (no pass_rate attribute). Route
+            # through the dedicated topstep objective.
+            prop_firm_style = None
+            pf_cfg = config_snapshot.get("prop_firm") if isinstance(config_snapshot, dict) else None
+            if isinstance(pf_cfg, dict):
+                prop_firm_style = pf_cfg.get("style")
+
+            if prop_firm_style == "topstep_combine_dollar":
+                from src.optimization.objectives import topstep_combine_pass_score
+
+                current_pass_rate = topstep_combine_pass_score(result)
+                # Clamp to [0, 1] so downstream comparisons still make
+                # sense when the target_pass_rate is defined in that
+                # range. The score is still signed internally for
+                # Optuna usage but the loop treats negative as "no progress".
+                current_pass_rate = max(0.0, current_pass_rate)
+            else:
+                current_pass_rate = challenge_sim.pass_rate if challenge_sim else 0.0
 
             logger.info(
                 "Iteration %d: PassRate=%.1f%%  Sharpe=%.3f  WinRate=%.1f%%  Trades=%d",
@@ -354,7 +372,13 @@ class OptimizationLoop:
                 new_challenge_sim = new_result.challenge_simulation
             elif isinstance(new_result, dict):
                 new_challenge_sim = new_result.get("challenge_simulation")
-            new_pass_rate = new_challenge_sim.pass_rate if new_challenge_sim else 0.0
+
+            if prop_firm_style == "topstep_combine_dollar":
+                from src.optimization.objectives import topstep_combine_pass_score
+
+                new_pass_rate = max(0.0, topstep_combine_pass_score(new_result))
+            else:
+                new_pass_rate = new_challenge_sim.pass_rate if new_challenge_sim else 0.0
 
             # ---- Decide keep / revert ---------------------------------------
             if new_pass_rate >= current_pass_rate:
