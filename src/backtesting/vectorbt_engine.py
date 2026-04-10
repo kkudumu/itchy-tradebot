@@ -242,6 +242,7 @@ class IchimokuBacktester:
         # Multi-strategy support
         from src.strategy.strategies.asian_breakout import AsianBreakoutStrategy
         from src.strategy.strategies.ema_pullback import EMAPullbackStrategy
+        from src.strategy.strategies.sss.strategy import SSSStrategy
         from src.strategy.signal_blender import SignalBlender
 
         active_strategy_names = cfg.get("active_strategies", ["ichimoku"])
@@ -257,6 +258,13 @@ class IchimokuBacktester:
             elif name == "ema_pullback":
                 ep_config = strategy_configs.get("ema_pullback", {})
                 self._active_strategies.append(("ema_pullback", EMAPullbackStrategy(config=ep_config)))
+            elif name == "sss":
+                # Wire SSS into the multi-strategy dispatch loop. The
+                # strategy is stateful (bar-by-bar swing history +
+                # sequence tracker) so it must be instantiated once and
+                # fed every bar, same as asian_breakout / ema_pullback.
+                sss_config = strategy_configs.get("sss", {})
+                self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
 
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
 
@@ -442,6 +450,18 @@ class IchimokuBacktester:
                             ema_mid=float(row_5m.get("ema_mid", 0.0)),
                             ema_slow=float(row_5m.get("ema_slow", 0.0)),
                             atr=float(row_5m.get("atr", 0.0) or 0.0),
+                        )
+                    elif _sn == "sss":
+                        # SSSStrategy.on_bar signature:
+                        # (timestamp, *, open, high, low, close, atr, spread=0.0)
+                        _sig = _sobj.on_bar(
+                            ts,
+                            open=open_price,
+                            high=high,
+                            low=low,
+                            close=close,
+                            atr=float(row_5m.get("atr", 0.0) or 0.0),
+                            spread=float(row_5m.get("spread", 0.0) or 0.0),
                         )
                     else:
                         _sig = None

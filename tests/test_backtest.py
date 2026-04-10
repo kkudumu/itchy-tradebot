@@ -809,6 +809,33 @@ class TestMultiStrategyBacktest:
         assert "asian_breakout" in names
         assert "ema_pullback" in names
 
+    def test_backtest_with_sss_instantiates(self):
+        """Plan Task 6: SSS must be dispatched by the multi-strategy loop."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+        from src.strategy.strategies.sss.strategy import SSSStrategy
+
+        config = {
+            "active_strategies": ["sss"],
+            "edges": {},
+        }
+        bt = IchimokuBacktester(config=config)
+        names = [n for n, _ in bt._active_strategies]
+        assert "sss" in names
+        sss_entry = next(pair for pair in bt._active_strategies if pair[0] == "sss")
+        assert isinstance(sss_entry[1], SSSStrategy)
+
+    def test_backtest_with_all_four_strategies_instantiates(self):
+        """Plan Task 14 prerequisite: blend of ichimoku + 3 others + sss."""
+        from src.backtesting.vectorbt_engine import IchimokuBacktester
+
+        config = {
+            "active_strategies": ["ichimoku", "asian_breakout", "ema_pullback", "sss"],
+            "edges": {},
+        }
+        bt = IchimokuBacktester(config=config)
+        names = [n for n, _ in bt._active_strategies]
+        assert names == ["asian_breakout", "ema_pullback", "sss"]
+
     def test_default_ichimoku_only(self):
         """Default config should default to ichimoku (no extra strategies)."""
         from src.backtesting.vectorbt_engine import IchimokuBacktester
