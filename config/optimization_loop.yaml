@@ -5,6 +5,7 @@ optimization:
   max_changes_per_iteration: 2
   plateau_threshold: 0.05
   plateau_iterations: 3
+  optimization_years: 0.5        # ~6 months = ~90K 1M bars for fast iteration
 
 persistence:
   enabled: true

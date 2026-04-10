@@ -107,7 +107,7 @@ class OptimizationLoop:
         pers = config.get("persistence", {})
         self._max_iterations: int = int(opt.get("max_iterations", 10))
         self._target_pass_rate: float = float(opt.get("target_pass_rate", 0.50))
-        self._optimization_years: int = int(opt.get("optimization_years", 2))
+        self._optimization_years: float = float(opt.get("optimization_years", 2))
         self._plateau_threshold: float = float(opt.get("plateau_threshold", 0.05))
         self._plateau_iterations: int = int(opt.get("plateau_iterations", 3))
         self._max_changes: int = int(opt.get("max_changes_per_iteration", 2))
