@@ -17,3 +17,49 @@ session_open_local: "17:00"
 session_close_local: "16:00"
 # CME has a 1h maintenance break each day at 16:00 CT
 maintenance_window_minutes: 60
+
+# ---------------------------------------------------------------------------
+# Strategy overrides for MGC futures
+#
+# These are merged ON TOP of strategy.yaml's base values when the active
+# instrument has class: futures. The base strategy.yaml carries the forex/
+# XAU spot defaults; these overrides adapt them for MGC's price scale,
+# volatility profile, and session dynamics WITHOUT touching the forex path.
+#
+# Rationale per strategy:
+#   * ichimoku: relax confluence threshold (the existing signal engine was
+#     tuned on multi-year forex history; MGC has only ~2 months of data so
+#     strict confluence kills too many signals)
+#   * asian_breakout: widen range window (MGC at ~$5000 has much wider
+#     intraday ranges in absolute terms than forex spot at ~$2000; pip_value
+#     already handles the unit conversion but min/max_range_pips need
+#     rescaling to the futures price level)
+#   * ema_pullback: relax angle thresholds (MGC's larger price scale means
+#     EMA angles are naturally smaller in degrees)
+#   * sss: keep pip thresholds (the pip_value=0.1 convention in the strategy
+#     already maps 1:1 between XAU spot and MGC ticks), relax confluence,
+#     wider min_stop for futures commissions
+# ---------------------------------------------------------------------------
+strategy_overrides:
+  ichimoku:
+    signal:
+      min_confluence_score: 0
+      tier_c: 0
+    atr:
+      stop_multiplier: 3.0
+  asian_breakout:
+    min_range_pips: 2
+    max_range_pips: 300
+    pip_value: 0.1
+    rr_ratio: 1.5
+  ema_pullback:
+    min_ema_angle_deg: 0.5
+    max_ema_angle_deg: 95
+    rr_ratio: 1.5
+  sss:
+    min_swing_pips: 0.3
+    min_confluence_score: 0
+    min_stop_pips: 15.0
+    warmup_bars: 30
+    rr_ratio: 1.5
+    spread_multiplier: 3.0

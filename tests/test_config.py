@@ -216,10 +216,13 @@ class TestStrategyConfig:
 
     def test_signal_tiers(self) -> None:
         sig = self._cfg.strategy.signal
-        assert sig.min_confluence_score == 1
+        # When the active instrument is class: futures, the futures
+        # profile overrides min_confluence_score and tier_c to 0.
+        # The base strategy.yaml values are 1 for both.
+        assert sig.min_confluence_score == 0  # futures profile override
         assert sig.tier_a_plus == 7
         assert sig.tier_b == 5
-        assert sig.tier_c == 1
+        assert sig.tier_c == 0  # futures profile override
 
     def test_signal_timeframes(self) -> None:
         tf = self._cfg.strategy.signal.timeframes

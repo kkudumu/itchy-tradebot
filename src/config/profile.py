@@ -41,6 +41,12 @@ class ProfileConfig(BaseModel):
     All fields have defaults so a missing profile file falls back to
     a forex-like profile. Fields are a superset of what either class
     needs; irrelevant fields on the opposite class are simply unused.
+
+    ``strategy_overrides`` carries per-strategy parameter patches that
+    are merged on top of the base ``config/strategy.yaml`` values when
+    this profile is active. This is how forex and futures get
+    independent strategy tuning without duplicating the entire
+    strategy config file.
     """
 
     instrument_class: InstrumentClass
@@ -58,6 +64,10 @@ class ProfileConfig(BaseModel):
     session_close_local: str = "23:59"
     # Daily maintenance window minutes (e.g. futures 1h daily halt at 16:00 CT)
     maintenance_window_minutes: int = 0
+    # Per-strategy parameter overrides — merged on top of the base
+    # strategy.yaml values when this profile is the active one.
+    # Example: {"sss": {"min_swing_pips": 2.0}, "asian_breakout": {"min_range_pips": 5}}
+    strategy_overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 _DEFAULT_PROFILE_DIR = Path(__file__).resolve().parents[2] / "config" / "profiles"

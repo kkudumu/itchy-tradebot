@@ -27,7 +27,8 @@ class TestStrategyYAML:
     def test_backward_compat_atr(self):
         cfg = load_config()
         assert cfg.strategy.atr.period == 14
-        assert cfg.strategy.atr.stop_multiplier == 2.5
+        # Futures profile override widens the stop multiplier to 3.0
+        assert cfg.strategy.atr.stop_multiplier == 3.0
 
     def test_risk_config_unchanged(self):
         cfg = load_config()

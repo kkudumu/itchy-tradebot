@@ -1,0 +1,36 @@
+{
+  "run_id": "futures_retuned_v1",
+  "total_events": 4819,
+  "per_strategy": {
+    "sss": {
+      "generated": 4242,
+      "entered": 40,
+      "rejected": 0,
+      "exited": 0,
+      "entry_rate_pct": 0.94
+    },
+    "ema_pullback": {
+      "generated": 468,
+      "entered": 67,
+      "rejected": 0,
+      "exited": 0,
+      "entry_rate_pct": 14.32
+    },
+    "ichimoku": {
+      "generated": 0,
+      "entered": 2,
+      "rejected": 0,
+      "exited": 0,
+      "entry_rate_pct": 0.0
+    }
+  },
+  "per_session": {
+    "asian": 1402,
+    "london": 1082,
+    "overlap": 884,
+    "ny": 1058,
+    "off": 393
+  },
+  "per_pattern": {},
+  "top_rejection_stages": {}
+}

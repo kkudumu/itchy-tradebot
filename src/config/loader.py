@@ -105,6 +105,29 @@ class ConfigLoader:
         for cls in classes_in_use:
             profiles[cls] = load_profile(cls, profile_dir=profile_dir)
 
+        # Merge profile-level strategy_overrides into strategy_data so
+        # forex and futures get independent strategy tuning without
+        # duplicating the whole strategy.yaml. The active instrument's
+        # class determines which profile's overrides apply. When
+        # multiple instruments with different classes are configured,
+        # the FIRST instrument's class wins (single-instrument is the
+        # normal case).
+        active_class = InstrumentClass.FOREX
+        for inst in instruments.instruments:
+            active_class = inst.class_
+            break
+        active_profile = profiles.get(active_class)
+        if active_profile and active_profile.strategy_overrides:
+            strategies_block = strategy_data.get("strategies", {})
+            for strat_name, overrides in active_profile.strategy_overrides.items():
+                if strat_name in strategies_block and isinstance(overrides, dict):
+                    strategies_block[strat_name] = _deep_merge(
+                        strategies_block[strat_name], overrides
+                    )
+                else:
+                    strategies_block[strat_name] = overrides
+            strategy_data["strategies"] = strategies_block
+
         return AppConfig(
             edges=EdgeConfig.model_validate(edges_data),
             strategy=StrategyConfig.model_validate(strategy_data),

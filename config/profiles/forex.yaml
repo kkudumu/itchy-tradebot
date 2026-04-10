@@ -16,3 +16,17 @@ daily_reset_tz: "UTC"
 session_open_local: "00:00"
 session_close_local: "23:59"
 maintenance_window_minutes: 0
+
+# ---------------------------------------------------------------------------
+# Strategy overrides for forex XAU/USD spot
+#
+# The base strategy.yaml was tuned on forex spot data (XAU/USD 2023-2026).
+# Forex overrides are intentionally EMPTY — the base values ARE the forex
+# defaults. This section exists purely to document that forex and futures
+# params don't cross-contaminate: futures reads from futures.yaml's
+# strategy_overrides block, forex reads from here (nothing to override).
+#
+# If future forex-specific tuning is needed, add per-strategy overrides
+# here in the same format as futures.yaml's block.
+# ---------------------------------------------------------------------------
+strategy_overrides: {}
