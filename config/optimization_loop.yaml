@@ -5,6 +5,13 @@ optimization:
   max_changes_per_iteration: 2
   plateau_threshold: 0.05
   plateau_iterations: 3
+  optimization_years: 0.5        # ~6 months = ~90K 1M bars for fast iteration
+  # Objective function used to score each trial. Options:
+  #   pass_rate                  — legacy: the5ers rolling/MC pct pass rate
+  #   topstep_combine_pass_score — TopstepX dollar-based pass/fail verdict
+  # The loop auto-detects the active prop_firm.style from strategy.yaml
+  # and overrides this default when they don't match.
+  objective: pass_rate
 
 persistence:
   enabled: true

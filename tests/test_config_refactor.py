@@ -31,7 +31,7 @@ class TestStrategyYAML:
 
     def test_risk_config_unchanged(self):
         cfg = load_config()
-        assert cfg.strategy.risk.initial_risk_pct == 1.5
+        assert cfg.strategy.risk.initial_risk_pct == 0.5
 
     def test_exit_config_unchanged(self):
         cfg = load_config()

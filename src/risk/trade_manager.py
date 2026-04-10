@@ -243,7 +243,10 @@ class TradeManager:
                 trade.stop_loss = new_stop
 
         elif decision.action == "full_exit":
-            self._archive_trade(trade_id, trade, current_price, decision.reason)
+            # Exit at the stop level (where the stop order fills), not at
+            # bar close which can be far worse after an intrabar stop hit.
+            trade.current_r = decision.r_multiple
+            self._archive_trade(trade_id, trade, trade.stop_loss, decision.reason)
 
         return decision
 

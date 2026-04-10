@@ -308,7 +308,7 @@ class TestFullLoopIntegration:
         mock_result = _make_result(sharpe=0.8, pass_rate=0.30)
 
         with patch.object(loop, "_run_backtest", return_value=mock_result), \
-             patch.object(loop, "_spawn_claude", return_value=""), \
+             patch.object(loop, "_spawn_claude", return_value="no changes needed"), \
              patch.object(loop, "_detect_changes", return_value=""):
             summary = loop.run()
 

@@ -10,7 +10,7 @@ For open trades:
     check exit edges → update trailing stops → log position updates
 
 Supports two operating modes:
-- live:     reads candles from MT5Bridge, executes via OrderManager
+- live:     reads candles from a market-data provider, executes via an execution provider
 - backtest: iterates a pre-loaded data feed, simulates execution
 """
 
@@ -75,13 +75,15 @@ class DecisionEngine:
         :class:`~src.learning.embeddings.EmbeddingEngine` instance.
     zone_manager:
         :class:`~src.zones.manager.ZoneManager` instance.
-    mt5_bridge:
-        :class:`~src.execution.mt5_bridge.MT5Bridge` instance.
-        Pass ``None`` for backtest mode.
-    order_manager:
-        :class:`~src.execution.order_manager.OrderManager` instance.
-    account_monitor:
-        :class:`~src.execution.account_monitor.AccountMonitor` instance.
+    market_data_provider:
+        Live market-data provider. When omitted, MT5Bridge can still be passed
+        and will be wrapped for backward compatibility.
+    execution_provider:
+        Live execution provider. When omitted, OrderManager can still be passed
+        and will be wrapped for backward compatibility.
+    account_provider:
+        Live account provider. When omitted, AccountMonitor can still be passed
+        and will be wrapped for backward compatibility.
     screenshot_capture:
         Optional callable ``(phase: str, trade_id: int) -> str | None``.
         Expected signature: ``capture(phase, trade_id) -> filepath_or_None``.
@@ -98,6 +100,9 @@ class DecisionEngine:
         similarity_search=None,
         embedding_engine=None,
         zone_manager=None,
+        market_data_provider=None,
+        execution_provider=None,
+        account_provider=None,
         mt5_bridge=None,
         order_manager=None,
         account_monitor=None,
@@ -125,6 +130,23 @@ class DecisionEngine:
         self.order_manager = order_manager
         self.account_monitor = account_monitor
         self.screenshot_capture = screenshot_capture
+
+        if market_data_provider is None and mt5_bridge is not None:
+            from src.providers import MT5MarketDataProvider
+
+            market_data_provider = MT5MarketDataProvider(mt5_bridge)
+        if execution_provider is None and order_manager is not None:
+            from src.providers import MT5ExecutionProvider
+
+            execution_provider = MT5ExecutionProvider(order_manager)
+        if account_provider is None and account_monitor is not None:
+            from src.providers import MT5AccountProvider
+
+            account_provider = MT5AccountProvider(account_monitor)
+
+        self.market_data_provider = market_data_provider
+        self.execution_provider = execution_provider
+        self.account_provider = account_provider
 
         # Strategy interface (alternative to signal_engine)
         if signal_engine is not None:
@@ -156,7 +178,7 @@ class DecisionEngine:
         self._scheduler = ScanScheduler(interval_minutes=self._scan_interval)
 
         # Operating mode
-        self._mode = "live" if mt5_bridge is not None else "backtest"
+        self._mode = "live" if self.market_data_provider is not None else "backtest"
 
         # Runtime state
         self._running = False
@@ -499,6 +521,15 @@ class DecisionEngine:
 
         # Step 10: position sizing
         lot_size = 0.01
+        point_value = self._point_value
+        if self._mode == "live" and self.market_data_provider is not None:
+            try:
+                spec = self.market_data_provider.get_contract_spec(self._instrument)
+                point_value = float(spec.point_value or self._point_value)
+                if spec.default_quantity is not None and spec.default_quantity > 0:
+                    lot_size = float(spec.default_quantity)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not resolve contract spec for %s: %s", self._instrument, exc)
         if self.trade_manager is not None:
             try:
                 _, active_trade, pos = self.trade_manager.open_trade(
@@ -507,7 +538,7 @@ class DecisionEngine:
                     take_profit=signal.take_profit,
                     direction=signal.direction,
                     atr=signal.atr,
-                    point_value=self._point_value,
+                    point_value=point_value,
                     account_equity=account_equity,
                     atr_multiplier=self._atr_multiplier,
                     instrument=self._instrument,
@@ -535,6 +566,10 @@ class DecisionEngine:
         execution_detail = self._execute_trade(signal, lot_size)
         executed = execution_detail.get("success", False)
         broker_trade_id = execution_detail.get("ticket")
+        if executed and internal_trade_id is not None and self.trade_manager is not None:
+            active = self.trade_manager._active_trades.get(internal_trade_id)  # noqa: SLF001
+            if active is not None:
+                setattr(active, "external_id", broker_trade_id)
 
         # Take pre-entry screenshot
         if self.screenshot_capture is not None and broker_trade_id:
@@ -789,12 +824,12 @@ class DecisionEngine:
     def _get_data(self) -> dict:
         """Retrieve current multi-timeframe market data.
 
-        Live mode:  from MT5Bridge.
+        Live mode:  from the configured market-data provider.
         Backtest:   from the backtest data feed set on the engine.
         """
-        if self._mode == "live" and self.mt5_bridge is not None:
+        if self._mode == "live" and self.market_data_provider is not None:
             try:
-                return self.mt5_bridge.get_multi_tf_rates(
+                return self.market_data_provider.get_multi_tf_data(
                     instrument=self._instrument,
                     count=500,
                 )
@@ -807,14 +842,16 @@ class DecisionEngine:
     def _get_account_equity(self) -> float:
         """Return current account equity.
 
-        Live: from AccountMonitor.
+        Live: from the configured account provider.
         Backtest: from TradeManager equity summary.
         """
-        if self._mode == "live" and self.account_monitor is not None:
+        if self._mode == "live" and self.account_provider is not None:
             try:
-                return self.account_monitor.equity or 10_000.0
+                info = self.account_provider.get_account_info()
+                if info is not None:
+                    return info.equity or 10_000.0
             except Exception as exc:  # noqa: BLE001
-                logger.warning("account_monitor.equity failed: %s", exc)
+                logger.warning("account_provider.get_account_info failed: %s", exc)
 
         if self.trade_manager is not None:
             try:
@@ -999,26 +1036,26 @@ class DecisionEngine:
     def _execute_trade(self, signal: Any, lot_size: float) -> dict:
         """Execute the trade order.
 
-        Live mode: sends a market order via OrderManager.
+        Live mode: sends a market order via the execution provider.
         Backtest mode: simulates a fill at the signal entry price.
         """
-        if self._mode == "live" and self.order_manager is not None:
+        if self._mode == "live" and self.execution_provider is not None:
             try:
-                result = self.order_manager.market_order(
+                result = self.execution_provider.place_market_order(
                     instrument=self._instrument,
                     direction=signal.direction,
-                    lot_size=lot_size,
+                    quantity=lot_size,
                     stop_loss=signal.stop_loss,
                     take_profit=signal.take_profit,
                     comment=f"Ichimoku {signal.quality_tier if hasattr(signal, 'quality_tier') else ''}",
                 )
                 return {
                     "success": result.success,
-                    "ticket": result.ticket,
-                    "price": result.price,
-                    "volume": result.volume,
-                    "retcode": result.retcode,
-                    "slippage": result.slippage,
+                    "ticket": result.order_id,
+                    "price": result.fill_price,
+                    "volume": result.quantity,
+                    "retcode": result.error_code,
+                    "slippage": result.raw.get("slippage", 0.0),
                     "error": result.error_message,
                 }
             except Exception as exc:  # noqa: BLE001
@@ -1046,26 +1083,33 @@ class DecisionEngine:
         }
 
     def _close_trade_live(self, trade_id: int, price: float, reason: str) -> dict:
-        """Send a close order via OrderManager in live mode (no-op in backtest)."""
-        if self._mode == "live" and self.order_manager is not None:
+        """Send a close order via the execution provider in live mode."""
+        if self._mode == "live" and self.execution_provider is not None:
             try:
-                # In live mode we need the MT5 ticket, not the internal id.
-                # The internal trade record stores the ticket under a convention
-                # not yet standardised; skip for now and rely on TradeManager.
-                logger.info("Closing trade %s at %.5f — %s", trade_id, price, reason)
+                self.execution_provider.close_position(self._instrument)
+                logger.info("Closing trade %s at %.5f - %s", trade_id, price, reason)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Error closing trade %s: %s", trade_id, exc)
         return {"success": True, "price": price, "reason": reason}
 
     def _partial_close_live(self, trade_id: int, close_pct: float, price: float) -> None:
-        """Partial close in live mode (no-op in backtest)."""
-        if self._mode == "live" and self.order_manager is not None:
-            logger.info("Partial close trade %s %.0f%% at %.5f", trade_id, close_pct * 100, price)
+        """Partial close in live mode."""
+        if self._mode == "live" and self.execution_provider is not None:
+            try:
+                quantity = close_pct
+                if self.trade_manager is not None:
+                    active = self.trade_manager._active_trades.get(trade_id)  # noqa: SLF001
+                    if active is not None:
+                        quantity = float(getattr(active, "lot_size", 0.0)) * close_pct
+                self.execution_provider.partial_close_position(self._instrument, quantity)
+                logger.info("Partial close trade %s %.0f%% at %.5f", trade_id, close_pct * 100, price)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error partially closing trade %s: %s", trade_id, exc)
 
     def _modify_stop_live(self, trade_id: int, new_stop: float) -> None:
-        """Modify trailing stop in live mode (no-op in backtest)."""
-        if self._mode == "live" and self.order_manager is not None:
-            logger.debug("Trail stop trade %s → %.5f", trade_id, new_stop)
+        """Modify trailing stop in live mode when the provider exposes it."""
+        if self._mode == "live" and self.execution_provider is not None:
+            logger.debug("Trail stop trade %s -> %.5f", trade_id, new_stop)
 
     # ------------------------------------------------------------------
     # Zone maintenance
@@ -1176,9 +1220,9 @@ class DecisionEngine:
 
     def _get_current_spread(self) -> float:
         """Return current bid/ask spread in price units."""
-        if self._mode == "live" and self.mt5_bridge is not None:
+        if self._mode == "live" and self.market_data_provider is not None:
             try:
-                tick = self.mt5_bridge.get_tick(self._instrument)
+                tick = self.market_data_provider.get_tick(self._instrument)
                 return float(tick.get("spread", 0.3))
             except Exception:  # noqa: BLE001
                 pass

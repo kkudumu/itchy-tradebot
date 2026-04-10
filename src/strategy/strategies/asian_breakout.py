@@ -35,6 +35,7 @@ _DEFAULT_CONFIG: dict = {
     "min_range_pips": 10,    # minimum Asian range in pips
     "max_range_pips": 200,   # maximum Asian range in pips
     "rr_ratio": 2.0,         # reward-to-risk ratio for TP
+    "pip_value": 0.1,        # price delta per "pip" (gold: $0.10 = 1 pip; MGC: 1 tick = $0.10)
     "instrument": "XAUUSD",
 }
 
@@ -85,10 +86,20 @@ class AsianBreakoutStrategy:
 
     @property
     def asian_range_pips(self) -> Optional[float]:
-        """Range in pips (1 pip = $0.10 for gold)."""
+        """Range expressed in pips.
+
+        A "pip" here is configurable via ``pip_value`` in the strategy
+        config (default 0.1 price units, matching the historical gold
+        convention of $0.10 per pip). For MGC futures where tick_size
+        is also 0.10, setting pip_value=0.1 yields the same pip count
+        as the forex path — no re-tuning needed at the boundary.
+        """
         if self._asian_high is None or self._asian_low is None:
             return None
-        return (self._asian_high - self._asian_low) * 10
+        pip_value = float(self._cfg.get("pip_value", 0.1))
+        if pip_value <= 0:
+            pip_value = 0.1
+        return (self._asian_high - self._asian_low) / pip_value
 
     @property
     def range_valid(self) -> bool:

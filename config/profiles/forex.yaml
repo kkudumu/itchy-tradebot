@@ -1,0 +1,18 @@
+# Forex profile defaults.
+# Applied to every instrument with class: forex in instruments.yaml.
+# Per-instrument values override these.
+
+instrument_class: forex
+
+# Cost model — commissions expressed per lot, slippage in pips
+default_commission_per_lot: 0.0
+default_slippage_pips: 0.5
+
+# Daily reset rolls over at midnight UTC (the5ers convention)
+daily_reset_hour: 0
+daily_reset_tz: "UTC"
+
+# Forex spot is effectively 24/5 during the week
+session_open_local: "00:00"
+session_close_local: "23:59"
+maintenance_window_minutes: 0

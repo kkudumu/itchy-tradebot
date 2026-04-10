@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -147,10 +148,44 @@ class IchimokuBacktester:
         self._initial_balance = initial_balance
         self._point_value = point_value
 
-        # Trading costs (default to 0.0 = no cost deduction for backward compat)
+        # Trading costs — forex uses per-lot + spread points; futures
+        # uses per-contract round-trip commission + tick slippage. The
+        # engine reads the instrument config from cfg["instrument"]
+        # (injected by the caller via run_demo_challenge.py) to pick
+        # the right model.
         costs = cfg.get("edges", {}).get("trading_costs", {})
         self._commission_per_lot = float(costs.get("commission_per_lot", 0.0))
         self._spread_points = float(costs.get("spread_points", 0.0))
+
+        # Futures cost path — opt-in via instrument.class: futures or
+        # by explicit cfg["commission_per_contract_round_trip"].
+        instrument_cfg = cfg.get("instrument") or {}
+        self._instrument_class = str(
+            instrument_cfg.get("class") or cfg.get("instrument_class") or "forex"
+        ).lower()
+        self._tick_size = float(
+            instrument_cfg.get("tick_size") or cfg.get("tick_size") or 0.0
+        )
+        self._tick_value_usd = float(
+            instrument_cfg.get("tick_value_usd")
+            or cfg.get("tick_value_usd")
+            or 0.0
+        )
+        self._commission_per_contract_rt = float(
+            instrument_cfg.get("commission_per_contract_round_trip")
+            or cfg.get("commission_per_contract_round_trip")
+            or 0.0
+        )
+        self._slippage_ticks = int(
+            instrument_cfg.get("slippage_ticks")
+            or cfg.get("slippage_ticks")
+            or (1 if self._instrument_class == "futures" else 0)
+        )
+        if self._instrument_class == "futures" and self._tick_size > 0:
+            # Override point_value so the existing pnl_points * lot * pv
+            # formula yields dollars for futures:
+            #   $ per price-unit per contract = tick_value_usd / tick_size
+            point_value = self._tick_value_usd / self._tick_size
 
         # Strategy components
         self.signal_engine = SignalEngine(config=cfg)
@@ -175,7 +210,7 @@ class IchimokuBacktester:
             position_sizer=sizer,
             circuit_breaker=breaker,
             exit_manager=exit_mgr,
-            max_concurrent=1,
+            max_concurrent=cfg.get("max_concurrent_positions", 3),
         )
 
         # Learning + logging components
@@ -201,7 +236,10 @@ class IchimokuBacktester:
             stats_analyzer=self._memory_stats,
         )
 
-        # Prop firm tracker (legacy single-phase)
+        # Prop firm tracker selection — dispatches on prop_firm.style.
+        # The legacy PropFirmTracker (single-phase pct) remains as a
+        # fallback for callers that pass explicit pct targets via
+        # __init__ kwargs, because existing test fixtures rely on it.
         self.prop_firm_tracker = PropFirmTracker(
             profit_target_pct=prop_firm_profit_target_pct,
             max_daily_dd_pct=prop_firm_max_daily_dd_pct,
@@ -209,23 +247,61 @@ class IchimokuBacktester:
             time_limit_days=prop_firm_time_limit_days,
         )
 
-        # Multi-phase prop firm tracker (The5ers 2-Step)
-        prop_firm_cfg = cfg.get("prop_firm", {})
-        p1 = prop_firm_cfg.get("phase_1", {})
-        p2 = prop_firm_cfg.get("phase_2", {})
-        funded = prop_firm_cfg.get("funded", {})
-        self.multi_phase_tracker = MultiPhasePropFirmTracker(
-            account_size=float(prop_firm_cfg.get("account_size", initial_balance)),
-            phase_1_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
-            phase_1_max_loss_pct=float(p1.get("max_loss_pct", 10.0)),
-            phase_1_daily_loss_pct=float(p1.get("daily_loss_pct", 5.0)),
-            phase_2_profit_target_pct=float(p2.get("profit_target_pct", 5.0)),
-            phase_2_max_loss_pct=float(p2.get("max_loss_pct", 10.0)),
-            phase_2_daily_loss_pct=float(p2.get("daily_loss_pct", 5.0)),
-            funded_monthly_target_pct=float(funded.get("monthly_target_pct", 10.0)),
-            funded_max_loss_pct=float(funded.get("max_loss_pct", 10.0)),
-            funded_daily_loss_pct=float(funded.get("daily_loss_pct", 5.0)),
-        )
+        prop_firm_cfg = cfg.get("prop_firm", {}) or {}
+        prop_firm_style = prop_firm_cfg.get("style", "the5ers_pct_phased")
+        self._prop_firm_style = prop_firm_style
+
+        # Active tracker — the one the engine's main loop calls update() on.
+        # Starts as the legacy PropFirmTracker for backward compat; replaced
+        # below when a style discriminator is present.
+        self.active_prop_firm_tracker = self.prop_firm_tracker
+
+        # TopstepX Combine path — dollar-based trailing MLL
+        if prop_firm_style == "topstep_combine_dollar":
+            from src.risk.session_clock import SessionClock
+            from src.risk.topstep_tracker import TopstepCombineTracker
+            from src.config.models import TopstepCombineConfig
+
+            tx_kwargs = {
+                k: v for k, v in prop_firm_cfg.items() if k != "style"
+            }
+            tx_config = TopstepCombineConfig(**tx_kwargs)
+            self.topstep_tracker = TopstepCombineTracker(config=tx_config)
+            self.active_prop_firm_tracker = self.topstep_tracker
+            # The5ers tracker is unused in topstep mode but we keep a
+            # safe default instance for backward compat on any legacy
+            # call sites that still reference it.
+            self.multi_phase_tracker = None
+            # SessionClock for 5pm CT day rollover in the circuit breaker
+            self._session_clock = SessionClock(
+                reset_hour_local=int(tx_config.daily_reset_hour),
+                reset_tz=tx_config.daily_reset_tz,
+            )
+            # Rebuild the circuit breaker with dollar-based daily loss
+            # limit + session clock
+            self.trade_manager._breaker = DailyCircuitBreaker(
+                max_daily_loss_usd=float(tx_config.daily_loss_limit_usd),
+                session_clock=self._session_clock,
+            )
+        else:
+            # Legacy the5ers 2-step / single-phase pct path — unchanged
+            self.topstep_tracker = None
+            self._session_clock = None
+            p1 = prop_firm_cfg.get("phase_1", {}) or {}
+            p2 = prop_firm_cfg.get("phase_2", {}) or {}
+            funded = prop_firm_cfg.get("funded", {}) or {}
+            self.multi_phase_tracker = MultiPhasePropFirmTracker(
+                account_size=float(prop_firm_cfg.get("account_size", initial_balance)),
+                phase_1_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
+                phase_1_max_loss_pct=float(p1.get("max_loss_pct", 10.0)),
+                phase_1_daily_loss_pct=float(p1.get("daily_loss_pct", 5.0)),
+                phase_2_profit_target_pct=float(p2.get("profit_target_pct", 5.0)),
+                phase_2_max_loss_pct=float(p2.get("max_loss_pct", 10.0)),
+                phase_2_daily_loss_pct=float(p2.get("daily_loss_pct", 5.0)),
+                funded_monthly_target_pct=float(funded.get("monthly_target_pct", 10.0)),
+                funded_max_loss_pct=float(funded.get("max_loss_pct", 10.0)),
+                funded_daily_loss_pct=float(funded.get("daily_loss_pct", 5.0)),
+            )
 
         self._metrics_calc = PerformanceMetrics()
 
@@ -259,18 +335,23 @@ class IchimokuBacktester:
                 ep_config = strategy_configs.get("ema_pullback", {})
                 self._active_strategies.append(("ema_pullback", EMAPullbackStrategy(config=ep_config)))
             elif name == "sss":
+                # Wire SSS into the multi-strategy dispatch loop. The
+                # strategy is stateful (bar-by-bar swing history +
+                # sequence tracker) so it must be instantiated once and
+                # fed every bar, same as asian_breakout / ema_pullback.
                 sss_config = strategy_configs.get("sss", {})
                 self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
 
-        # SSS exit manager (SequenceExitMode) — used for SSS trades only
-        sss_strategy_cfg = strategy_configs.get("sss", {}) if isinstance(strategy_configs, dict) else {}
-        from src.strategy.strategies.sss.sequence_exit import SequenceExitMode as _SequenceExitMode
-        self._sss_exit_manager = _SequenceExitMode(
-            spread_multiplier=float(sss_strategy_cfg.get("spread_multiplier", 2.0)),
-            min_stop_pips=float(sss_strategy_cfg.get("min_stop_pips", 10.0)),
-        )
-
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
+
+        # Strategy telemetry collector — captures every signal event,
+        # filter rejection, and trade exit for downstream analysis and
+        # mega-vision training data.
+        from src.backtesting.strategy_telemetry import StrategyTelemetryCollector
+
+        self.telemetry = StrategyTelemetryCollector(
+            run_id=cfg.get("run_id", "backtest")
+        )
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -349,16 +430,24 @@ class IchimokuBacktester:
         equity_by_r: List[float] = []  # closed R-multiples for equity curve modifier
         learning_skipped: int = 0  # signals skipped by adaptive learning
 
-        # Active trade state
+        # Active trade state — supports multiple concurrent trades
+        # Each entry: {trade_id: {"trade": ActiveTrade, "signal": Signal,
+        #              "context": dict, "candles": int, "strategy": str}}
+        active_trades: Dict[int, dict] = {}
+        # Backwards-compat aliases (used by dashboard / end-of-data cleanup)
         active_trade_id: Optional[int] = None
         active_trade: Optional[ActiveTrade] = None
         active_signal: Optional[Signal] = None
         active_context: Optional[dict] = None
         candles_since_entry: int = 0
 
-        # Prop firm tracker init
+        # Prop firm tracker init — always initialise the legacy tracker
+        # (it's read by the final BacktestResult for backward compat)
+        # AND the active tracker when they differ (e.g. TopstepX mode).
         first_ts = pd.Timestamp(df_5m.index[0]).to_pydatetime()
         self.prop_firm_tracker.initialise(self._initial_balance, first_ts)
+        if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+            self.active_prop_firm_tracker.initialise(self._initial_balance, first_ts)
 
         # Circuit breaker — set up first day
         prev_date = None
@@ -427,6 +516,8 @@ class IchimokuBacktester:
             if np.isnan(close):
                 equity_records.append((ts, balance))
                 self.prop_firm_tracker.update(ts, balance)
+                if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+                    self.active_prop_firm_tracker.update(ts, balance)
                 continue
 
             # Retrieve higher-TF values aligned to this 5M bar
@@ -452,10 +543,16 @@ class IchimokuBacktester:
                             atr=float(row_5m.get("atr", 0.0) or 0.0),
                         )
                     elif _sn == "sss":
+                        # SSSStrategy.on_bar signature:
+                        # (timestamp, *, open, high, low, close, atr, spread=0.0)
                         _sig = _sobj.on_bar(
-                            ts, open=open_price, high=high, low=low, close=close,
+                            ts,
+                            open=open_price,
+                            high=high,
+                            low=low,
+                            close=close,
                             atr=float(row_5m.get("atr", 0.0) or 0.0),
-                            spread=float(row_5m.get("spread", 0.3)),
+                            spread=float(row_5m.get("spread", 0.0) or 0.0),
                         )
                     else:
                         _sig = None
@@ -463,29 +560,48 @@ class IchimokuBacktester:
                         _sig.strategy_name = _sn
                         _bar_strategy_signals.append(_sig)
                         _pipeline_counts["signals_generated"] += 1
+                        # Telemetry: emit signal_generated for downstream analysis
+                        try:
+                            self.telemetry.emit_signal_generated(
+                                ts,
+                                _sn,
+                                direction=getattr(_sig, "direction", None),
+                                price=getattr(_sig, "entry_price", None) or close,
+                                atr=float(row_5m.get("atr", 0.0) or 0.0),
+                                adx=float(row_5m.get("adx", 0.0) or 0.0),
+                                confluence_score=float(
+                                    getattr(_sig, "confluence_score", 0) or 0
+                                ),
+                                pattern_type=getattr(_sig, "pattern_type", None),
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
             # ------------------------------------------------------------------
-            # Manage open trade
+            # Manage ALL open trades (no longer blocks new entries)
             # ------------------------------------------------------------------
-            if active_trade_id is not None and active_trade is not None:
-                if _bar_strategy_signals:
-                    _pipeline_counts["signals_filtered_in_trade"] += len(_bar_strategy_signals)
-                candles_since_entry += 1
+            kijun_5m = float(row_5m.get("kijun", np.nan))
+            kijun_1h = htf_vals.get("kijun_1h", np.nan)
+            _closed_this_bar: List[int] = []
 
-                kijun_5m = float(row_5m.get("kijun", np.nan))
-                kijun_1h = htf_vals.get("kijun_1h", np.nan)
+            for _tid, _tstate in list(active_trades.items()):
+                _tobj = _tstate["trade"]
+                _tsig = _tstate["signal"]
+                _tctx = _tstate["context"]
+                _tcandles = _tstate["candles"] + 1
+                _tstate["candles"] = _tcandles
 
                 # Build edge context for exit checks
                 edge_ctx = self._build_edge_context(
                     ts=ts,
                     row_5m=row_5m,
                     htf_vals=htf_vals,
-                    active_trade=active_trade,
-                    candles_since_entry=candles_since_entry,
+                    active_trade=_tobj,
+                    candles_since_entry=_tcandles,
                     equity_by_r=equity_by_r,
-                    confluence_score=active_signal.confluence_score if active_signal else 0,
+                    confluence_score=_tsig.confluence_score if _tsig else 0,
                 )
 
                 # Check edge-based exit conditions (friday close, time stop)
@@ -497,12 +613,12 @@ class IchimokuBacktester:
                         "edge_exit",
                     )
                     trade_summary = self.trade_manager.close_trade(
-                        trade_id=active_trade_id,
+                        trade_id=_tid,
                         exit_price=close,
                         reason=exit_reason,
                     )
                     trade_summary = self._enrich_trade_summary(
-                        trade_summary, active_signal, active_context, instrument, balance
+                        trade_summary, _tsig, _tctx, instrument, balance
                     )
                     closed_trades.append(trade_summary)
                     _r = float(trade_summary.get("r_multiple") or 0.0)
@@ -510,117 +626,104 @@ class IchimokuBacktester:
                     if _r > 0: _n_wins += 1
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
-                    self._record_learning(trade_summary, active_context, enable_learning)
+                    self._record_learning(trade_summary, _tctx, enable_learning)
                     self.health_monitor.on_trade_closed(won=_r > 0)
                     if live_dashboard is not None:
                         self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
                     if _screenshot_fn:
-                        _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
-                    active_trade_id = None
-                    active_trade = None
-                    active_signal = None
-                    active_context = None
-                    candles_since_entry = 0
+                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    _closed_this_bar.append(_tid)
+                    continue
 
-                else:
-                    # Route exit to SequenceExitMode for SSS trades, HybridExitManager otherwise
-                    _is_sss_trade = (
-                        active_signal is not None
-                        and getattr(active_signal, "strategy_name", None) == "sss"
+                # Check stop, partial exit, and trail via HybridExitManager
+                decision = self.trade_manager.update_trade(
+                    trade_id=_tid,
+                    current_price=close,
+                    kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
+                    higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
+                    bar_high=high,
+                    bar_low=low,
+                )
+
+                if decision.action == "full_exit":
+                    trade_summary = self.trade_manager.closed_trades[-1]
+                    trade_summary = self._enrich_trade_summary(
+                        dict(trade_summary), _tsig, _tctx, instrument, balance
                     )
-                    if _is_sss_trade:
-                        # Find the SSSStrategy instance to get its swing history
-                        _sss_obj = next(
-                            (obj for name, obj in self._active_strategies if name == "sss"),
-                            None,
-                        )
-                        _recent_swings = (
-                            _sss_obj._swing_history if _sss_obj is not None else []
-                        )
-                        _sss_spread = float(row_5m.get("spread", 0.3))
-                        decision = self._sss_exit_manager.check_exit(
-                            trade=active_trade,
-                            current_price=close,
-                            recent_swings=_recent_swings,
-                            spread=_sss_spread,
-                            bar_high=high,
-                            bar_low=low,
-                        )
-                        # Sync stop_loss change back into trade_manager's record
-                        if decision.action == "trail_update" and decision.new_stop is not None:
-                            active_trade.stop_loss = decision.new_stop
-                    else:
-                        # Check stop, partial exit, and trail via HybridExitManager
-                        # Pass bar high/low for realistic intrabar SL/TP checks
-                        decision = self.trade_manager.update_trade(
-                            trade_id=active_trade_id,
-                            current_price=close,
-                            kijun_value=kijun_5m if not np.isnan(kijun_5m) else close,
-                            higher_tf_kijun=kijun_1h if not np.isnan(kijun_1h) else None,
-                            bar_high=high,
-                            bar_low=low,
-                        )
+                    closed_trades.append(trade_summary)
+                    _r = float(trade_summary.get("r_multiple") or 0.0)
+                    equity_by_r.append(_r)
+                    if _r > 0: _n_wins += 1
+                    else: _n_losses += 1
+                    balance = self._update_balance_from_trade(balance, trade_summary)
+                    self._record_learning(trade_summary, _tctx, enable_learning)
+                    self.health_monitor.on_trade_closed(won=_r > 0)
+                    if live_dashboard is not None:
+                        self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                    if _screenshot_fn:
+                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    _closed_this_bar.append(_tid)
 
-                    if decision.action == "full_exit":
-                        if _is_sss_trade:
-                            # SSS exit manager does not archive via trade_manager; close explicitly
-                            exit_price = active_trade.stop_loss if decision.new_stop is None else close
-                            trade_summary = self.trade_manager.close_trade(
-                                trade_id=active_trade_id,
-                                exit_price=exit_price,
-                                reason=decision.reason or "sss_stop",
-                            )
-                        else:
-                            # Trade was archived in trade_manager by update_trade; retrieve the summary
-                            trade_summary = self.trade_manager.closed_trades[-1]
-                        trade_summary = self._enrich_trade_summary(
-                            dict(trade_summary), active_signal, active_context, instrument, balance
-                        )
-                        closed_trades.append(trade_summary)
-                        _r = float(trade_summary.get("r_multiple") or 0.0)
-                        equity_by_r.append(_r)
-                        if _r > 0: _n_wins += 1
-                        else: _n_losses += 1
-                        balance = self._update_balance_from_trade(balance, trade_summary)
-                        self._record_learning(trade_summary, active_context, enable_learning)
-                        self.health_monitor.on_trade_closed(won=_r > 0)
-                        if live_dashboard is not None:
-                            self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
-                        if _screenshot_fn:
-                            _screenshot_fn(df_5m, bar_idx, "exit", active_trade_id)
-                        active_trade_id = None
-                        active_trade = None
-                        active_signal = None
-                        active_context = None
-                        candles_since_entry = 0
+                elif decision.action == "partial_exit":
+                    partial_pnl = self._partial_pnl(
+                        trade=_tobj,
+                        exit_price=close,
+                        close_pct=0.5,
+                    )
+                    balance += partial_pnl
+                    logger.debug(
+                        "Partial exit at bar %d: 50%% closed @ %.2f (R=%.2f), pnl=%.2f",
+                        bar_idx, close, decision.r_multiple, partial_pnl,
+                    )
 
-                    elif decision.action == "partial_exit":
-                        # 50% closed at 2R — log partial event to trade summary
-                        # The remaining 50% continues trailing; balance update is partial.
-                        partial_pnl = self._partial_pnl(
-                            trade=active_trade,
-                            exit_price=close,
-                            close_pct=0.5,
-                        )
-                        balance += partial_pnl
-                        logger.debug(
-                            "Partial exit at bar %d: 50%% closed @ %.2f (R=%.2f), pnl=%.2f",
-                            bar_idx, close, decision.r_multiple, partial_pnl,
-                        )
+            # Remove closed trades from active dict
+            for _tid in _closed_this_bar:
+                active_trades.pop(_tid, None)
+
+            # Keep legacy aliases in sync (for dashboard / end-of-data)
+            if active_trades:
+                _last_tid = max(active_trades)
+                active_trade_id = _last_tid
+                active_trade = active_trades[_last_tid]["trade"]
+                active_signal = active_trades[_last_tid]["signal"]
+                active_context = active_trades[_last_tid]["context"]
+                candles_since_entry = active_trades[_last_tid]["candles"]
+            else:
+                active_trade_id = None
+                active_trade = None
+                active_signal = None
+                active_context = None
+                candles_since_entry = 0
 
             # ------------------------------------------------------------------
-            # Look for new trade entry (only when flat)
+            # Look for new trade entries (runs even when trades are open)
             # ------------------------------------------------------------------
-            elif bar_idx >= _WARMUP_BARS:
+            if bar_idx >= _WARMUP_BARS:
+                # Track which strategies already have an open trade
+                _strategies_in_trade = {
+                    _ts["strategy"] for _ts in active_trades.values()
+                }
+
                 can_open, reason = self.trade_manager.can_open_trade(balance, instrument)
                 if can_open:
-                    # Use signals already collected from the state-update pass above
-                    all_signals: List[Signal] = list(_bar_strategy_signals)
+                    # Collect all signals
+                    all_signals: List[Signal] = []
+
+                    # Add strategy signals not already in a trade
+                    for _sig in _bar_strategy_signals:
+                        _sig_strat = getattr(_sig, "strategy_name", "unknown")
+                        if _sig_strat not in _strategies_in_trade:
+                            all_signals.append(_sig)
+                        else:
+                            _pipeline_counts["signals_filtered_in_trade"] += 1
+
                     cfg = self._config
 
-                    # Also try existing Ichimoku scanner (if ichimoku is active)
+                    # Also try Ichimoku scanner (if active and not already in trade)
                     active_names = [n for n, _ in self._active_strategies]
-                    if "ichimoku" in active_names or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]):
+                    if ("ichimoku" not in _strategies_in_trade
+                            and ("ichimoku" in active_names
+                                 or "ichimoku" in cfg.get("active_strategies", ["ichimoku"]))):
                         ichi_signal = self._scan_for_signal(tf_data, bar_idx, instrument)
                         if ichi_signal is not None:
                             all_signals.append(ichi_signal)
@@ -701,20 +804,38 @@ class IchimokuBacktester:
                                         entry_time=ts,
                                     )
 
+                                    _strat_name = getattr(signal, "strategy_name", "ichimoku")
+                                    active_trades[trade_id] = {
+                                        "trade": trade_obj,
+                                        "signal": signal,
+                                        "context": self._build_entry_context(
+                                            signal=signal,
+                                            row_5m=row_5m,
+                                            htf_vals=htf_vals,
+                                            ts=ts,
+                                            risk_pct=pos_size.risk_pct,
+                                        ),
+                                        "candles": 0,
+                                        "strategy": _strat_name,
+                                    }
+                                    # Sync legacy aliases
                                     active_trade_id = trade_id
                                     active_trade = trade_obj
                                     active_signal = signal
+                                    active_context = active_trades[trade_id]["context"]
                                     candles_since_entry = 0
                                     _pipeline_counts["signals_entered"] += 1
-
-                                    # Capture entry context for embedding
-                                    active_context = self._build_entry_context(
-                                        signal=signal,
-                                        row_5m=row_5m,
-                                        htf_vals=htf_vals,
-                                        ts=ts,
-                                        risk_pct=pos_size.risk_pct,
-                                    )
+                                    # Telemetry: emit entered event
+                                    try:
+                                        self.telemetry.emit_entry(
+                                            ts,
+                                            _strat_name or "ichimoku",
+                                            direction=signal.direction,
+                                            price=float(signal.entry_price),
+                                            planned_size=float(pos_size.lot_size),
+                                        )
+                                    except Exception:
+                                        pass
 
                                     # Entry screenshot
                                     if _screenshot_fn:
@@ -722,10 +843,10 @@ class IchimokuBacktester:
 
                                     logger.debug(
                                         "Trade opened: %s %s @ %.2f SL=%.2f TP=%.2f "
-                                        "lots=%.2f risk=%.2f%%",
+                                        "lots=%.2f risk=%.2f%% strategy=%s",
                                         signal.direction, instrument, signal.entry_price,
                                         signal.stop_loss, signal.take_profit,
-                                        pos_size.lot_size, pos_size.risk_pct,
+                                        pos_size.lot_size, pos_size.risk_pct, _strat_name,
                                     )
                                 except RuntimeError as exc:
                                     logger.debug("Trade open rejected: %s", exc)
@@ -739,6 +860,8 @@ class IchimokuBacktester:
             # Record equity at this bar
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
+            if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+                self.active_prop_firm_tracker.update(ts, balance)
 
             # ── Checkpoint: early abort if strategy is clearly broken ──
             _CHECKPOINT_INTERVAL = 25_000  # Check every ~25K 5M bars (~1 month)
@@ -803,8 +926,30 @@ class IchimokuBacktester:
                     _safe_float(row_5m.get("senkou_b")),
                     _safe_float(row_5m.get("chikou")),
                 ])
+                # 1M candle push — push all 5 constituent 1M bars for this 5M bar
+                if "1M" in tf_data:
+                    tf_df_1m = tf_data["1M"]
+                    _start_1m = pd.Timestamp(ts_raw)
+                    _end_1m = _start_1m + pd.Timedelta(minutes=5)
+                    _m_slice = tf_df_1m.loc[(_start_1m <= tf_df_1m.index) & (tf_df_1m.index < _end_1m)]
+                    for _m_idx_ts, _m_row in _m_slice.iterrows():
+                        _m_unix = int(_m_idx_ts.timestamp())
+                        live_dashboard.append_candle("1m", [
+                            _m_unix,
+                            _safe_float(_m_row.get("open")),
+                            _safe_float(_m_row.get("high")),
+                            _safe_float(_m_row.get("low")),
+                            _safe_float(_m_row.get("close")),
+                            _safe_float(_m_row.get("volume", _m_row.get("tick_volume"))),
+                            _safe_float(_m_row.get("tenkan")),
+                            _safe_float(_m_row.get("kijun")),
+                            _safe_float(_m_row.get("senkou_a")),
+                            _safe_float(_m_row.get("senkou_b")),
+                            _safe_float(_m_row.get("chikou")),
+                        ])
+
                 # Higher timeframe candle push
-                for tf_key, tf_seconds in [("15M", 900), ("1H", 3600), ("4H", 14400)]:
+                for tf_key, tf_seconds in [("15M", 900), ("30M", 1800), ("1H", 3600), ("4H", 14400), ("1D", 86400)]:
                     if _time_val % tf_seconds == 0 and tf_key in tf_data:
                         tf_df = tf_data[tf_key]
                         mask = tf_df.index <= ts_raw
@@ -907,32 +1052,35 @@ class IchimokuBacktester:
         )
 
         # ------------------------------------------------------------------
-        # Force-close any trade still open at end of data
+        # Force-close ALL trades still open at end of data
         # ------------------------------------------------------------------
-        if active_trade_id is not None and active_trade is not None and not df_5m.empty:
+        if active_trades and not df_5m.empty:
             final_row = df_5m.iloc[-1]
-            final_close = float(final_row.get("close", active_trade.entry_price))
-            trade_summary = self.trade_manager.close_trade(
-                trade_id=active_trade_id,
-                exit_price=final_close,
-                reason="end_of_data",
-            )
-            trade_summary = self._enrich_trade_summary(
-                trade_summary, active_signal, active_context, instrument, balance
-            )
-            closed_trades.append(trade_summary)
-            _r = float(trade_summary.get("r_multiple") or 0.0)
-            equity_by_r.append(_r)
-            if _r > 0: _n_wins += 1
-            else: _n_losses += 1
-            balance = self._update_balance_from_trade(balance, trade_summary)
-            self._record_learning(trade_summary, active_context, enable_learning)
-            self.health_monitor.on_trade_closed(won=_r > 0)
-            if live_dashboard is not None:
-                final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
-                if final_ts.tzinfo is None:
-                    final_ts = final_ts.replace(tzinfo=timezone.utc)
-                self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
+            final_close = float(final_row.get("close", 0.0))
+            final_ts = pd.Timestamp(df_5m.index[-1]).to_pydatetime()
+            if final_ts.tzinfo is None:
+                final_ts = final_ts.replace(tzinfo=timezone.utc)
+
+            for _tid, _tstate in list(active_trades.items()):
+                trade_summary = self.trade_manager.close_trade(
+                    trade_id=_tid,
+                    exit_price=final_close,
+                    reason="end_of_data",
+                )
+                trade_summary = self._enrich_trade_summary(
+                    trade_summary, _tstate["signal"], _tstate["context"], instrument, balance
+                )
+                closed_trades.append(trade_summary)
+                _r = float(trade_summary.get("r_multiple") or 0.0)
+                equity_by_r.append(_r)
+                if _r > 0: _n_wins += 1
+                else: _n_losses += 1
+                balance = self._update_balance_from_trade(balance, trade_summary)
+                self._record_learning(trade_summary, _tstate["context"], enable_learning)
+                self.health_monitor.on_trade_closed(won=_r > 0)
+                if live_dashboard is not None:
+                    self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
+            active_trades.clear()
 
         # Signal live dashboard completion
         if live_dashboard is not None:
@@ -973,6 +1121,16 @@ class IchimokuBacktester:
         metrics["pipeline_counts"] = _pipeline_counts
 
         prop_status = self.prop_firm_tracker.check_pass()
+
+        # When running under a non-legacy tracker (e.g. TopstepX), the
+        # active tracker is authoritative for the final verdict. Expose
+        # its dict snapshot alongside the legacy pct-status dict.
+        active_tracker_dict: Optional[dict] = None
+        if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+            try:
+                active_tracker_dict = self.active_prop_firm_tracker.to_dict()
+            except Exception as exc:
+                logger.warning("active tracker to_dict failed: %s", exc)
 
         # ------------------------------------------------------------------
         # Challenge simulation (Monte Carlo + rolling window)
@@ -1020,18 +1178,50 @@ class IchimokuBacktester:
             learning_skipped,
         )
 
+        prop_firm_dict: Dict[str, Any] = {
+            "status": prop_status.status,
+            "profit_pct": prop_status.profit_pct,
+            "max_daily_dd_pct": prop_status.max_daily_dd_pct,
+            "max_total_dd_pct": prop_status.max_total_dd_pct,
+            "days_elapsed": prop_status.days_elapsed,
+            "details": prop_status.details,
+        }
+        if active_tracker_dict is not None:
+            # Merge in the active tracker's snapshot under a separate
+            # key so both the legacy pct view and the active tracker
+            # (e.g. TopstepX dollar view) are available to consumers.
+            prop_firm_dict["style"] = active_tracker_dict.get("style", "unknown")
+            prop_firm_dict["active_tracker"] = active_tracker_dict
+            # Override top-level status with the active tracker's status
+            # when it's further along (failed beats pending, etc.)
+            active_status = active_tracker_dict.get("status")
+            if active_status and active_status != "pending":
+                prop_firm_dict["status"] = active_status
+
+        # Flush telemetry to disk — caller can control the path via
+        # cfg["telemetry_output_dir"] or we fall back to reports/<run_id>/.
+        try:
+            telem_dir = Path(
+                self._config.get("telemetry_output_dir")
+                or f"reports/{self.telemetry.run_id}"
+            )
+            telem_dir.mkdir(parents=True, exist_ok=True)
+            self.telemetry.to_parquet(telem_dir / "strategy_telemetry.parquet")
+            self.telemetry.to_summary_json(telem_dir / "strategy_telemetry_summary.json")
+            logger.info(
+                "Strategy telemetry: %d events written to %s",
+                self.telemetry.event_count,
+                telem_dir,
+            )
+            self.telemetry.log_console_summary()
+        except Exception as exc:
+            logger.warning("Telemetry flush failed: %s", exc)
+
         return BacktestResult(
             trades=closed_trades,
             metrics=metrics,
             equity_curve=equity_curve,
-            prop_firm={
-                "status": prop_status.status,
-                "profit_pct": prop_status.profit_pct,
-                "max_daily_dd_pct": prop_status.max_daily_dd_pct,
-                "max_total_dd_pct": prop_status.max_total_dd_pct,
-                "days_elapsed": prop_status.days_elapsed,
-                "details": prop_status.details,
-            },
+            prop_firm=prop_firm_dict,
             daily_pnl=daily_pnl,
             skipped_signals=skipped_signals,
             total_signals=total_signals,
@@ -1046,15 +1236,18 @@ class IchimokuBacktester:
     def _push_trade_to_dashboard(live_dashboard, trade_summary: dict, ts: datetime, trade_id: int) -> None:
         """Push a completed trade to the live dashboard."""
         entry_time = trade_summary.get("entry_time", ts)
+        entry_iso = entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time)
+        exit_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
         live_dashboard.append_trade({
             "id": trade_id,
             "direction": trade_summary.get("direction", ""),
-            "entry_time": int(entry_time.timestamp()) if hasattr(entry_time, "timestamp") else 0,
-            "exit_time": int(ts.timestamp()),
+            "entry_time": entry_iso,
+            "exit_time": exit_iso,
             "entry_price": float(trade_summary.get("entry_price", 0)),
             "exit_price": float(trade_summary.get("exit_price", 0)),
             "r_multiple": float(trade_summary.get("r_multiple", 0)),
-            "pnl": float(trade_summary.get("pnl_points", 0)) * float(trade_summary.get("lot_size", 0)) * 100.0,
+            "pnl_points": float(trade_summary.get("pnl_points", 0)),
+            "original_stop": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "stop_loss": float(trade_summary.get("original_stop", trade_summary.get("stop_loss", 0))),
             "take_profit": float(trade_summary.get("take_profit", 0)),
             "exit_reason": trade_summary.get("exit_reason", trade_summary.get("reason", "")),
@@ -1247,12 +1440,31 @@ class IchimokuBacktester:
         lot_size = float(trade_summary.get("lot_size") or 0.0)
         remaining_pct = float(trade_summary.get("remaining_pct") or 1.0)
 
-        # Gross P&L = points * lot_size * point_value * remaining fraction
+        # Gross P&L = points * lot_size * point_value * remaining fraction.
+        # For futures, point_value was set in __init__ to tick_value_usd /
+        # tick_size so this formula returns dollars for N contracts.
         monetary_pnl = pnl_points * lot_size * self._point_value * remaining_pct
 
-        # Trading costs (spread + commission), proportional to fraction closed
-        spread_cost = self._spread_points * lot_size * self._point_value * remaining_pct
-        commission_cost = self._commission_per_lot * lot_size * remaining_pct
+        # Trading costs — model depends on instrument class.
+        if self._instrument_class == "futures":
+            # Futures: full round-trip commission on the final close,
+            # scaled proportionally to the fraction closed. Slippage
+            # is N ticks × 2 (entry + exit) × tick_value_usd.
+            commission_cost = (
+                self._commission_per_contract_rt * lot_size * remaining_pct
+            )
+            slippage_cost = (
+                self._slippage_ticks
+                * 2.0
+                * self._tick_value_usd
+                * lot_size
+                * remaining_pct
+            )
+            spread_cost = 0.0
+            commission_cost += slippage_cost
+        else:
+            spread_cost = self._spread_points * lot_size * self._point_value * remaining_pct
+            commission_cost = self._commission_per_lot * lot_size * remaining_pct
 
         new_balance = balance + monetary_pnl - spread_cost - commission_cost
 
@@ -1272,6 +1484,19 @@ class IchimokuBacktester:
         else:
             pnl_points = trade.entry_price - exit_price
         gross_pnl = pnl_points * trade.lot_size * self._point_value * close_pct
+
+        if self._instrument_class == "futures":
+            commission_cost = (
+                self._commission_per_contract_rt * trade.lot_size * close_pct
+            )
+            slippage_cost = (
+                self._slippage_ticks
+                * self._tick_value_usd
+                * trade.lot_size
+                * close_pct
+            )
+            return gross_pnl - commission_cost - slippage_cost
+
         spread_cost = self._spread_points * trade.lot_size * self._point_value * close_pct
         commission_cost = self._commission_per_lot * trade.lot_size * close_pct
         return gross_pnl - spread_cost - commission_cost

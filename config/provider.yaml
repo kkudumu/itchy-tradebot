@@ -1,0 +1,15 @@
+provider: projectx
+
+projectx:
+  api_base_url: "https://api.topstepx.com"
+  user_hub_url: "https://rtc.thefuturesdesk.projectx.com/hubs/user"
+  market_hub_url: "https://rtc.thefuturesdesk.projectx.com/hubs/market"
+  username_env: "PROJECTX_USERNAME"
+  api_key_env: "PROJECTX_API_KEY"
+  account_id: 21445420
+  live: false
+  request_timeout_seconds: 30.0
+  default_contract_id:
+  default_symbol_id:
+  bar_limit: 500
+  token_refresh_buffer_seconds: 300

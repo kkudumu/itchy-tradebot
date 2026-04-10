@@ -25,8 +25,10 @@ from src.config.models import (
     DatabaseConfig,
     EdgeConfig,
     InstrumentsConfig,
+    ProviderConfig,
     StrategyConfig,
 )
+from src.config.profile import InstrumentClass, ProfileConfig, load_profile
 
 # Default config directory is <project_root>/config/
 _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
@@ -64,7 +66,9 @@ class ConfigLoader:
         2. config/strategy.yaml
         3. config/database.yaml
         4. config/instruments.yaml
-        5. Per-instrument overrides embedded in instruments.yaml
+        5. config/provider.yaml
+        6. config/profiles/<class>.yaml for every class referenced by an
+           instrument (forex / futures)
 
     Environment variable ``CONFIG_DIR`` overrides the default directory.
     """
@@ -87,12 +91,27 @@ class ConfigLoader:
         strategy_data = _load_yaml(self._dir / "strategy.yaml")
         database_data = _load_yaml(self._dir / "database.yaml")
         instruments_data = _load_yaml(self._dir / "instruments.yaml")
+        provider_data = _load_yaml(self._dir / "provider.yaml")
+
+        instruments = InstrumentsConfig.model_validate(instruments_data)
+
+        # Load profile defaults for every class referenced by an instrument,
+        # plus both standard classes so downstream code can always look up
+        # either profile regardless of which instruments are configured.
+        profile_dir = self._dir / "profiles"
+        profiles: dict[InstrumentClass, ProfileConfig] = {}
+        classes_in_use = {inst.class_ for inst in instruments.instruments}
+        classes_in_use.update({InstrumentClass.FOREX, InstrumentClass.FUTURES})
+        for cls in classes_in_use:
+            profiles[cls] = load_profile(cls, profile_dir=profile_dir)
 
         return AppConfig(
             edges=EdgeConfig.model_validate(edges_data),
             strategy=StrategyConfig.model_validate(strategy_data),
             database=DatabaseConfig.model_validate(database_data),
-            instruments=InstrumentsConfig.model_validate(instruments_data),
+            instruments=instruments,
+            provider=ProviderConfig.model_validate(provider_data),
+            profiles=profiles,
         )
 
     # ------------------------------------------------------------------

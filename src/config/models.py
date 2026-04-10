@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.config.profile import InstrumentClass, ProfileConfig, load_profile
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +232,70 @@ class SignalConfig(BaseModel):
     timeframes: list[str] = Field(default_factory=lambda: ["4H", "1H", "15M", "5M"])
 
 
+# ---------------------------------------------------------------------------
+# Prop firm configs — discriminated union on ``style``
+# ---------------------------------------------------------------------------
+
+
+class The5ersPhaseConfig(BaseModel):
+    """Phase-level rules for the5ers-style pct-based multi-phase challenges."""
+
+    profit_target_pct: float
+    max_loss_pct: float
+    daily_loss_pct: float
+    time_limit_days: int = 0
+
+
+class The5ersPctPhasedConfig(BaseModel):
+    """Legacy the5ers 2-step High Stakes Classic config (pct-based).
+
+    The percentage-based multi-phase model that drove the original
+    challenge pipeline. Kept alive as an alternative style so existing
+    forex/the5ers code paths keep working while the futures branch uses
+    ``topstep_combine_dollar``.
+    """
+
+    style: Literal["the5ers_pct_phased"] = "the5ers_pct_phased"
+    name: str = "the5ers_2step_high_stakes"
+    account_size: float = 10_000.0
+    leverage: int = 100
+    phase_1: The5ersPhaseConfig
+    phase_2: The5ersPhaseConfig
+    funded: dict = Field(default_factory=dict)
+
+
+class TopstepCombineConfig(BaseModel):
+    """TopstepX $50K Combine config (dollar-based trailing MLL).
+
+    All dollar thresholds are absolute, not percentages. The trailing
+    maximum loss limit (``max_loss_limit_usd_trailing``) trails each
+    end-of-day balance and locks at the starting balance once it's
+    first reached — see ``src/risk/topstep_tracker.py`` for the full
+    semantics implemented in plan Task 3.
+    """
+
+    style: Literal["topstep_combine_dollar"] = "topstep_combine_dollar"
+    name: str = "topstep_50k_combine"
+    account_size: float = 50_000.0
+    profit_target_usd: float = 3_000.0
+    max_loss_limit_usd_trailing: float = 2_000.0
+    daily_loss_limit_usd: float = 1_000.0
+    consistency_pct: float = 50.0
+    max_micro_contracts: int = 50
+    max_full_contracts: int = 5
+    daily_reset_tz: str = "America/Chicago"
+    daily_reset_hour: int = 17
+
+
+# Discriminated union — ``style`` selects the concrete config class at
+# load time. Pydantic uses the literal on ``style`` to pick which model
+# to validate the payload against.
+PropFirmConfig = Annotated[
+    Union[The5ersPctPhasedConfig, TopstepCombineConfig],
+    Field(discriminator="style"),
+]
+
+
 class StrategyConfig(BaseModel):
     active_strategy: str = "ichimoku"
     strategies: dict[str, dict] = Field(default_factory=lambda: {
@@ -248,21 +314,34 @@ class StrategyConfig(BaseModel):
     })
     risk: RiskConfig = Field(default_factory=RiskConfig)
     exit: ExitConfig = Field(default_factory=ExitConfig)
+    # Discriminated union — validated from the ``prop_firm:`` YAML block.
+    # Optional to allow test fixtures that omit prop firm altogether.
+    prop_firm: PropFirmConfig | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _migrate_flat_format(cls, values: Any) -> Any:
-        """Accept old flat format (ichimoku/adx/atr/signal at top level) for
-        backward compatibility with tests and legacy YAML files.
+        """Accept old flat format + backfill prop_firm style for backward compat.
 
-        If the incoming data does not have an ``active_strategy`` or
-        ``strategies`` key but does have flat strategy keys, migrate them into
-        the nested structure automatically.
+        Two migrations happen here:
+
+        1. Legacy ``prop_firm:`` blocks that omit the ``style:`` discriminator
+           are interpreted as ``the5ers_pct_phased`` — the historic default —
+           so old test fixtures and legacy YAML keep validating without edits.
+        2. Flat strategy config (ichimoku/adx/atr/signal at the top level)
+           is migrated into the nested ``strategies`` dict structure.
         """
         if not isinstance(values, dict):
             return values
 
-        # Already new-format — nothing to do
+        # (1) Prop firm style backfill: inject "the5ers_pct_phased" when the
+        # style discriminator is missing. Pydantic's discriminated union
+        # requires the discriminator to be present at load time.
+        pf = values.get("prop_firm")
+        if isinstance(pf, dict) and "style" not in pf:
+            pf["style"] = "the5ers_pct_phased"
+
+        # (2) Flat strategy format → nested (unchanged from original impl)
         if "active_strategy" in values or "strategies" in values:
             return values
 
@@ -330,14 +409,86 @@ class DatabaseConfig(BaseModel):
 
 
 class InstrumentOverride(BaseModel):
-    """Per-instrument parameter overrides applied on top of base strategy config."""
+    """Per-instrument parameter overrides applied on top of base strategy config.
+
+    The ``class_`` field (accepts ``class`` in YAML via alias) selects the
+    profile defaults loaded from ``config/profiles/<class>.yaml``. Futures
+    instruments must declare ``tick_size``, ``tick_value_usd``, and
+    ``contract_size`` — the ``model_validator`` enforces this so a misconfigured
+    YAML fails loudly at load time rather than producing silent zero-sizing
+    deep in the engine.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     symbol: str
+    class_: InstrumentClass = Field(
+        default=InstrumentClass.FOREX,
+        alias="class",
+        description="Instrument asset class (forex | futures) — drives profile selection",
+    )
+    provider: str | None = None
+    contract_id: str | None = None
+    symbol_id: str | None = None
+    # Common tick metadata (futures) / pip metadata (forex)
+    tick_size: float | None = None
+    tick_value: float | None = None  # legacy alias for tick_value_usd
+    tick_value_usd: float | None = None
+    contract_size: float | None = None
+    commission_per_contract_round_trip: float | None = None
+    session_open_ct: str | None = None
+    session_close_ct: str | None = None
+    daily_reset_hour_ct: int | None = None
+    # Forex-specific
+    pip_size: float | None = None
+    pip_value_per_lot: float | None = None
+    standard_lot_units: float | None = None
+    # Legacy / free-form fields kept for backward compatibility
+    price_scale: float | None = None
+    commission_per_contract: float | None = None
+    default_quantity: int | None = None
     # Optional field-level overrides; None means "use strategy default"
     adx_threshold: int | None = None
     spread_max_points: int | None = None
     atr_stop_multiplier: float | None = None
     pip_value_usd: float | None = None   # USD value of 1 pip/point per lot
+
+    @model_validator(mode="after")
+    def _backfill_and_validate_by_class(self) -> "InstrumentOverride":
+        # Backfill canonical aliases from legacy field names so downstream
+        # code can read tick_value_usd / pip_size without having to look at
+        # both sets of keys.
+        if self.tick_value_usd is None and self.tick_value is not None:
+            self.tick_value_usd = self.tick_value
+        if self.class_ == InstrumentClass.FOREX:
+            if self.pip_size is None and self.tick_size is not None:
+                self.pip_size = self.tick_size
+            if self.pip_value_per_lot is None and self.pip_value_usd is not None:
+                self.pip_value_per_lot = self.pip_value_usd
+
+        # Validate class-specific required fields. Futures must have the
+        # full tick/contract size triple so the sizer and cost model can
+        # convert risk dollars to contracts without guessing.
+        if self.class_ == InstrumentClass.FUTURES:
+            missing: list[str] = []
+            if self.tick_size is None or self.tick_size <= 0:
+                missing.append("tick_size")
+            if self.tick_value_usd is None or self.tick_value_usd <= 0:
+                missing.append("tick_value_usd")
+            if self.contract_size is None or self.contract_size <= 0:
+                missing.append("contract_size")
+            if missing:
+                raise ValueError(
+                    f"Futures instrument {self.symbol!r} is missing required "
+                    f"fields: {missing}. Set these in instruments.yaml "
+                    "(tick_size, tick_value_usd, contract_size)."
+                )
+        return self
+
+    @property
+    def profile(self) -> ProfileConfig:
+        """Lazily loaded profile defaults for this instrument's class."""
+        return load_profile(self.class_)
 
 
 class InstrumentsConfig(BaseModel):
@@ -352,6 +503,37 @@ class InstrumentsConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Provider config models
+# ---------------------------------------------------------------------------
+
+
+class ProjectXConfig(BaseModel):
+    api_base_url: str = "https://api.topstepx.com"
+    user_hub_url: str = "https://rtc.thefuturesdesk.projectx.com/hubs/user"
+    market_hub_url: str = "https://rtc.thefuturesdesk.projectx.com/hubs/market"
+    username_env: str = "PROJECTX_USERNAME"
+    api_key_env: str = "PROJECTX_API_KEY"
+    account_id: int | None = None
+    live: bool = False
+    request_timeout_seconds: float = 30.0
+    default_contract_id: str | None = None
+    default_symbol_id: str | None = None
+    bar_limit: int = 500
+    token_refresh_buffer_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> "ProjectXConfig":
+        self.bar_limit = max(1, min(self.bar_limit, 20_000))
+        self.token_refresh_buffer_seconds = max(0, self.token_refresh_buffer_seconds)
+        return self
+
+
+class ProviderConfig(BaseModel):
+    provider: str = "projectx"
+    projectx: ProjectXConfig = Field(default_factory=ProjectXConfig)
+
+
+# ---------------------------------------------------------------------------
 # Root application config
 # ---------------------------------------------------------------------------
 
@@ -363,3 +545,21 @@ class AppConfig(BaseModel):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     instruments: InstrumentsConfig = Field(default_factory=InstrumentsConfig)
+    provider: ProviderConfig = Field(default_factory=ProviderConfig)
+    profiles: dict[InstrumentClass, ProfileConfig] = Field(
+        default_factory=dict,
+        description="Class-wide profile defaults keyed by InstrumentClass. "
+        "Populated by the loader from config/profiles/*.yaml.",
+    )
+
+    def profile_for(self, symbol: str) -> ProfileConfig | None:
+        """Return the profile defaults for the instrument *symbol*.
+
+        Looks up the instrument's ``class_`` in ``instruments`` and returns
+        the matching profile from ``profiles``. Returns ``None`` when the
+        symbol is unknown.
+        """
+        inst = self.instruments.get(symbol)
+        if inst is None:
+            return None
+        return self.profiles.get(inst.class_) or load_profile(inst.class_)

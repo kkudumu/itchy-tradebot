@@ -1,0 +1,36 @@
+# Mega-Vision Agent config (plan Task 25)
+
+# Mode selector:
+#   disabled  — native blender only, no agent involvement
+#   shadow    — agent is consulted on every signal but execution is
+#               byte-identical to disabled (decisions logged only)
+#   authority — agent filters the native signal set within safety gates
+mode: disabled
+
+# Model IDs — use the Claude subscription via the installed CLI.
+# Opus for shadow mode (deeper reasoning, higher token cost OK because
+# shadow is not latency-sensitive), Haiku for live (latency-sensitive).
+shadow_model: "claude-opus-4-6"
+live_model: "claude-haiku-4-5-20251001"
+
+# Decision cadence:
+#   per_signal — run the agent on every bar that has ≥1 native signal
+#   per_n_bars — run the agent every N bars regardless of signal count
+decision_cadence: per_signal
+per_n_bars: 5
+
+# Cost tracking — subscription_mode disables dollar billing and reports
+# "subscription" as the cost category. Set cost_budget_usd to a non-null
+# value for runs against the raw API.
+subscription_mode: true
+cost_budget_usd: null
+
+# Safety gates
+kill_switch_env_var: "MEGA_VISION_KILL_SWITCH"
+max_retries_per_decision: 3
+fallback_on_timeout_seconds: 30
+
+# Prompt versions (informational — actual files live in prompts/)
+prompt_template_versions:
+  system: "v1"
+  user: "v1"

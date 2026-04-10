@@ -15,6 +15,7 @@ dependencies = [
     # Data processing
     "numpy>=1.26",
     "pandas>=2.1",
+    "requests>=2.31",
 
     # Backtesting & optimisation
     "vectorbt>=0.26",
