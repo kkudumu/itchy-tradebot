@@ -489,6 +489,41 @@ class BacktestDashboard:
             _metric_card("Learning", learning_phase.title(), "#a78bfa"),
         ])
 
+        # TopstepX-style metric row — rendered when the active tracker
+        # is dollar-based so the user sees MLL distance + daily loss
+        # headroom + consistency instead of the pct-based view.
+        topstep_html = ""
+        active_tracker = pf.get("active_tracker") if isinstance(pf, dict) else None
+        if active_tracker and active_tracker.get("style") == "topstep_combine_dollar":
+            at = active_tracker
+            current_balance = float(at.get("current_balance") or 0.0)
+            mll = float(at.get("mll") or 0.0)
+            mll_locked = bool(at.get("mll_locked") or False)
+            distance_to_mll = float(at.get("distance_to_mll") or 0.0)
+            distance_to_target = float(at.get("distance_to_target") or 0.0)
+            total_profit = float(at.get("total_profit") or 0.0)
+            best_day_profit = float(at.get("best_day_profit") or 0.0)
+            consistency_pct = (
+                (best_day_profit / total_profit * 100.0) if total_profit > 0 else 0.0
+            )
+            mll_color = (
+                "#00ff88" if distance_to_mll > 1500 else "#ffd93d" if distance_to_mll > 500 else "#ff6b6b"
+            )
+            tgt_color = "#00ff88" if distance_to_target <= 0 else "#ffd93d"
+            cons_color = "#00ff88" if consistency_pct < 45 else "#ffd93d" if consistency_pct < 50 else "#ff6b6b"
+            mll_label = f"${mll:,.0f}" + (" 🔒" if mll_locked else "")
+            topstep_html = (
+                '<div style="display:flex;gap:12px;margin:20px 0;flex-wrap:wrap;">'
+                + "".join([
+                    _metric_card("Balance", f"${current_balance:,.0f}"),
+                    _metric_card("MLL", mll_label, mll_color),
+                    _metric_card("Dist → MLL", f"${distance_to_mll:,.0f}", mll_color),
+                    _metric_card("Dist → Target", f"${distance_to_target:,.0f}", tgt_color),
+                    _metric_card("Best Day / Total", f"{consistency_pct:.1f}%", cons_color),
+                ])
+                + "</div>"
+            )
+
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
         html = f"""<!DOCTYPE html>
@@ -617,6 +652,8 @@ class BacktestDashboard:
 <div class="metrics-row">
     {metrics_html}
 </div>
+
+{topstep_html}
 
 <div class="chart-section">
     <img src="data:image/png;base64,{equity_b64}" alt="Equity Curve">
