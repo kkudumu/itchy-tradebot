@@ -75,6 +75,11 @@ class Signal:
     mtf_state: Optional[MTFState] = None
     zone_context: dict = field(default_factory=dict)
     strategy_name: str = "ichimoku"
+    trade_type: str = ""               # 'kijun_bounce'|'kumo_breakout'|'walking_dragon'|...
+    wave_targets: dict = field(default_factory=dict)  # {'n_value': float, ...}
+    elliott_position: dict = field(default_factory=dict)
+    cloud_balance_state: dict = field(default_factory=dict)
+    kihon_suchi_state: dict = field(default_factory=dict)
 
 
 @dataclass
