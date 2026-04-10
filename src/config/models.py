@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -232,6 +232,70 @@ class SignalConfig(BaseModel):
     timeframes: list[str] = Field(default_factory=lambda: ["4H", "1H", "15M", "5M"])
 
 
+# ---------------------------------------------------------------------------
+# Prop firm configs — discriminated union on ``style``
+# ---------------------------------------------------------------------------
+
+
+class The5ersPhaseConfig(BaseModel):
+    """Phase-level rules for the5ers-style pct-based multi-phase challenges."""
+
+    profit_target_pct: float
+    max_loss_pct: float
+    daily_loss_pct: float
+    time_limit_days: int = 0
+
+
+class The5ersPctPhasedConfig(BaseModel):
+    """Legacy the5ers 2-step High Stakes Classic config (pct-based).
+
+    The percentage-based multi-phase model that drove the original
+    challenge pipeline. Kept alive as an alternative style so existing
+    forex/the5ers code paths keep working while the futures branch uses
+    ``topstep_combine_dollar``.
+    """
+
+    style: Literal["the5ers_pct_phased"] = "the5ers_pct_phased"
+    name: str = "the5ers_2step_high_stakes"
+    account_size: float = 10_000.0
+    leverage: int = 100
+    phase_1: The5ersPhaseConfig
+    phase_2: The5ersPhaseConfig
+    funded: dict = Field(default_factory=dict)
+
+
+class TopstepCombineConfig(BaseModel):
+    """TopstepX $50K Combine config (dollar-based trailing MLL).
+
+    All dollar thresholds are absolute, not percentages. The trailing
+    maximum loss limit (``max_loss_limit_usd_trailing``) trails each
+    end-of-day balance and locks at the starting balance once it's
+    first reached — see ``src/risk/topstep_tracker.py`` for the full
+    semantics implemented in plan Task 3.
+    """
+
+    style: Literal["topstep_combine_dollar"] = "topstep_combine_dollar"
+    name: str = "topstep_50k_combine"
+    account_size: float = 50_000.0
+    profit_target_usd: float = 3_000.0
+    max_loss_limit_usd_trailing: float = 2_000.0
+    daily_loss_limit_usd: float = 1_000.0
+    consistency_pct: float = 50.0
+    max_micro_contracts: int = 50
+    max_full_contracts: int = 5
+    daily_reset_tz: str = "America/Chicago"
+    daily_reset_hour: int = 17
+
+
+# Discriminated union — ``style`` selects the concrete config class at
+# load time. Pydantic uses the literal on ``style`` to pick which model
+# to validate the payload against.
+PropFirmConfig = Annotated[
+    Union[The5ersPctPhasedConfig, TopstepCombineConfig],
+    Field(discriminator="style"),
+]
+
+
 class StrategyConfig(BaseModel):
     active_strategy: str = "ichimoku"
     strategies: dict[str, dict] = Field(default_factory=lambda: {
@@ -250,21 +314,34 @@ class StrategyConfig(BaseModel):
     })
     risk: RiskConfig = Field(default_factory=RiskConfig)
     exit: ExitConfig = Field(default_factory=ExitConfig)
+    # Discriminated union — validated from the ``prop_firm:`` YAML block.
+    # Optional to allow test fixtures that omit prop firm altogether.
+    prop_firm: PropFirmConfig | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _migrate_flat_format(cls, values: Any) -> Any:
-        """Accept old flat format (ichimoku/adx/atr/signal at top level) for
-        backward compatibility with tests and legacy YAML files.
+        """Accept old flat format + backfill prop_firm style for backward compat.
 
-        If the incoming data does not have an ``active_strategy`` or
-        ``strategies`` key but does have flat strategy keys, migrate them into
-        the nested structure automatically.
+        Two migrations happen here:
+
+        1. Legacy ``prop_firm:`` blocks that omit the ``style:`` discriminator
+           are interpreted as ``the5ers_pct_phased`` — the historic default —
+           so old test fixtures and legacy YAML keep validating without edits.
+        2. Flat strategy config (ichimoku/adx/atr/signal at the top level)
+           is migrated into the nested ``strategies`` dict structure.
         """
         if not isinstance(values, dict):
             return values
 
-        # Already new-format — nothing to do
+        # (1) Prop firm style backfill: inject "the5ers_pct_phased" when the
+        # style discriminator is missing. Pydantic's discriminated union
+        # requires the discriminator to be present at load time.
+        pf = values.get("prop_firm")
+        if isinstance(pf, dict) and "style" not in pf:
+            pf["style"] = "the5ers_pct_phased"
+
+        # (2) Flat strategy format → nested (unchanged from original impl)
         if "active_strategy" in values or "strategies" in values:
             return values
 

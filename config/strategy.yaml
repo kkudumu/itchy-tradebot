@@ -93,23 +93,43 @@ exit:
   higher_tf_kijun_start_r: 3.0   # Switch to higher-TF Kijun trail from 3 R
 
 prop_firm:
-  name: the5ers_2step_high_stakes
-  account_size: 10000
-  leverage: 100
-  phase_1:
-    profit_target_pct: 8.0
-    max_loss_pct: 10.0
-    daily_loss_pct: 5.0
-    time_limit_days: 0
-  phase_2:
-    profit_target_pct: 5.0
-    max_loss_pct: 10.0
-    daily_loss_pct: 5.0
-    time_limit_days: 0
-  funded:
-    monthly_target_pct: 10.0
-    max_loss_pct: 10.0
-    daily_loss_pct: 5.0
+  # TopstepX $50K Combine (dollar-based trailing MLL)
+  # The style discriminator is read by the pydantic PropFirmConfig
+  # union to pick the concrete schema at load time.
+  style: topstep_combine_dollar
+  name: topstep_50k_combine
+  account_size: 50000
+  profit_target_usd: 3000
+  max_loss_limit_usd_trailing: 2000
+  daily_loss_limit_usd: 1000
+  consistency_pct: 50.0
+  max_micro_contracts: 50
+  max_full_contracts: 5
+  daily_reset_tz: "America/Chicago"
+  daily_reset_hour: 17
+
+# Legacy the5ers 2-step High Stakes Classic config — kept for reference.
+# To switch back: uncomment this block (and comment the topstep block above)
+# OR copy these values into a the5ers-specific strategy.yaml via CONFIG_DIR.
+# prop_firm:
+#   style: the5ers_pct_phased
+#   name: the5ers_2step_high_stakes
+#   account_size: 10000
+#   leverage: 100
+#   phase_1:
+#     profit_target_pct: 8.0
+#     max_loss_pct: 10.0
+#     daily_loss_pct: 5.0
+#     time_limit_days: 0
+#   phase_2:
+#     profit_target_pct: 5.0
+#     max_loss_pct: 10.0
+#     daily_loss_pct: 5.0
+#     time_limit_days: 0
+#   funded:
+#     monthly_target_pct: 10.0
+#     max_loss_pct: 10.0
+#     daily_loss_pct: 5.0
 
 active_strategies:
   - sss

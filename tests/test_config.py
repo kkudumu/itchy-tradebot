@@ -15,6 +15,8 @@ from src.config.models import (
     InstrumentsConfig,
     ProviderConfig,
     StrategyConfig,
+    The5ersPctPhasedConfig,
+    TopstepCombineConfig,
 )
 
 
@@ -288,3 +290,104 @@ class TestConfigLoader:
         cfg = load_config(config_dir=project_config_dir)
         assert cfg.provider.provider == "projectx"
         assert cfg.provider.projectx.api_base_url.startswith("https://api.")
+
+
+# ---------------------------------------------------------------------------
+# Prop firm discriminated union (plan Task 2)
+# ---------------------------------------------------------------------------
+
+
+class TestPropFirmDiscriminatedUnion:
+    def test_project_yaml_loads_topstep_combine(self, project_config_dir: Path) -> None:
+        """The checked-in strategy.yaml uses topstep_combine_dollar by default."""
+        cfg = load_config(config_dir=project_config_dir)
+        assert cfg.strategy.prop_firm is not None
+        assert isinstance(cfg.strategy.prop_firm, TopstepCombineConfig)
+        assert cfg.strategy.prop_firm.style == "topstep_combine_dollar"
+        assert cfg.strategy.prop_firm.account_size == 50_000.0
+        assert cfg.strategy.prop_firm.profit_target_usd == 3_000.0
+        assert cfg.strategy.prop_firm.max_loss_limit_usd_trailing == 2_000.0
+        assert cfg.strategy.prop_firm.daily_loss_limit_usd == 1_000.0
+        assert cfg.strategy.prop_firm.consistency_pct == 50.0
+        assert cfg.strategy.prop_firm.daily_reset_tz == "America/Chicago"
+        assert cfg.strategy.prop_firm.daily_reset_hour == 17
+
+    def test_legacy_the5ers_yaml_without_style_loads(self, tmp_config_dir: Path) -> None:
+        """A prop_firm block with no style field defaults to the5ers_pct_phased."""
+        strategy_yaml = tmp_config_dir / "strategy.yaml"
+        strategy_yaml.write_text(
+            textwrap.dedent(
+                """
+                active_strategy: ichimoku
+                prop_firm:
+                  name: the5ers_2step_high_stakes
+                  account_size: 10000
+                  leverage: 100
+                  phase_1:
+                    profit_target_pct: 8.0
+                    max_loss_pct: 10.0
+                    daily_loss_pct: 5.0
+                  phase_2:
+                    profit_target_pct: 5.0
+                    max_loss_pct: 10.0
+                    daily_loss_pct: 5.0
+                """
+            ),
+            encoding="utf-8",
+        )
+        cfg = load_config(config_dir=tmp_config_dir)
+        assert isinstance(cfg.strategy.prop_firm, The5ersPctPhasedConfig)
+        assert cfg.strategy.prop_firm.style == "the5ers_pct_phased"
+        assert cfg.strategy.prop_firm.account_size == 10_000.0
+        assert cfg.strategy.prop_firm.phase_1.profit_target_pct == 8.0
+        assert cfg.strategy.prop_firm.phase_2.profit_target_pct == 5.0
+
+    def test_explicit_the5ers_style_loads(self, tmp_config_dir: Path) -> None:
+        strategy_yaml = tmp_config_dir / "strategy.yaml"
+        strategy_yaml.write_text(
+            textwrap.dedent(
+                """
+                active_strategy: ichimoku
+                prop_firm:
+                  style: the5ers_pct_phased
+                  name: the5ers_2step_high_stakes
+                  account_size: 10000
+                  phase_1:
+                    profit_target_pct: 8.0
+                    max_loss_pct: 10.0
+                    daily_loss_pct: 5.0
+                  phase_2:
+                    profit_target_pct: 5.0
+                    max_loss_pct: 10.0
+                    daily_loss_pct: 5.0
+                """
+            ),
+            encoding="utf-8",
+        )
+        cfg = load_config(config_dir=tmp_config_dir)
+        assert isinstance(cfg.strategy.prop_firm, The5ersPctPhasedConfig)
+
+    def test_unknown_style_raises(self, tmp_config_dir: Path) -> None:
+        strategy_yaml = tmp_config_dir / "strategy.yaml"
+        strategy_yaml.write_text(
+            textwrap.dedent(
+                """
+                active_strategy: ichimoku
+                prop_firm:
+                  style: some_made_up_style
+                  account_size: 10000
+                """
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(Exception, match="style"):
+            load_config(config_dir=tmp_config_dir)
+
+    def test_missing_prop_firm_block_is_allowed(self, tmp_config_dir: Path) -> None:
+        """A strategy.yaml without a prop_firm block loads with prop_firm=None."""
+        strategy_yaml = tmp_config_dir / "strategy.yaml"
+        strategy_yaml.write_text(
+            "active_strategy: ichimoku\n", encoding="utf-8"
+        )
+        cfg = load_config(config_dir=tmp_config_dir)
+        assert cfg.strategy.prop_firm is None
