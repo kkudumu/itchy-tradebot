@@ -148,10 +148,44 @@ class IchimokuBacktester:
         self._initial_balance = initial_balance
         self._point_value = point_value
 
-        # Trading costs (default to 0.0 = no cost deduction for backward compat)
+        # Trading costs — forex uses per-lot + spread points; futures
+        # uses per-contract round-trip commission + tick slippage. The
+        # engine reads the instrument config from cfg["instrument"]
+        # (injected by the caller via run_demo_challenge.py) to pick
+        # the right model.
         costs = cfg.get("edges", {}).get("trading_costs", {})
         self._commission_per_lot = float(costs.get("commission_per_lot", 0.0))
         self._spread_points = float(costs.get("spread_points", 0.0))
+
+        # Futures cost path — opt-in via instrument.class: futures or
+        # by explicit cfg["commission_per_contract_round_trip"].
+        instrument_cfg = cfg.get("instrument") or {}
+        self._instrument_class = str(
+            instrument_cfg.get("class") or cfg.get("instrument_class") or "forex"
+        ).lower()
+        self._tick_size = float(
+            instrument_cfg.get("tick_size") or cfg.get("tick_size") or 0.0
+        )
+        self._tick_value_usd = float(
+            instrument_cfg.get("tick_value_usd")
+            or cfg.get("tick_value_usd")
+            or 0.0
+        )
+        self._commission_per_contract_rt = float(
+            instrument_cfg.get("commission_per_contract_round_trip")
+            or cfg.get("commission_per_contract_round_trip")
+            or 0.0
+        )
+        self._slippage_ticks = int(
+            instrument_cfg.get("slippage_ticks")
+            or cfg.get("slippage_ticks")
+            or (1 if self._instrument_class == "futures" else 0)
+        )
+        if self._instrument_class == "futures" and self._tick_size > 0:
+            # Override point_value so the existing pnl_points * lot * pv
+            # formula yields dollars for futures:
+            #   $ per price-unit per contract = tick_value_usd / tick_size
+            point_value = self._tick_value_usd / self._tick_size
 
         # Strategy components
         self.signal_engine = SignalEngine(config=cfg)
@@ -1379,12 +1413,31 @@ class IchimokuBacktester:
         lot_size = float(trade_summary.get("lot_size") or 0.0)
         remaining_pct = float(trade_summary.get("remaining_pct") or 1.0)
 
-        # Gross P&L = points * lot_size * point_value * remaining fraction
+        # Gross P&L = points * lot_size * point_value * remaining fraction.
+        # For futures, point_value was set in __init__ to tick_value_usd /
+        # tick_size so this formula returns dollars for N contracts.
         monetary_pnl = pnl_points * lot_size * self._point_value * remaining_pct
 
-        # Trading costs (spread + commission), proportional to fraction closed
-        spread_cost = self._spread_points * lot_size * self._point_value * remaining_pct
-        commission_cost = self._commission_per_lot * lot_size * remaining_pct
+        # Trading costs — model depends on instrument class.
+        if self._instrument_class == "futures":
+            # Futures: full round-trip commission on the final close,
+            # scaled proportionally to the fraction closed. Slippage
+            # is N ticks × 2 (entry + exit) × tick_value_usd.
+            commission_cost = (
+                self._commission_per_contract_rt * lot_size * remaining_pct
+            )
+            slippage_cost = (
+                self._slippage_ticks
+                * 2.0
+                * self._tick_value_usd
+                * lot_size
+                * remaining_pct
+            )
+            spread_cost = 0.0
+            commission_cost += slippage_cost
+        else:
+            spread_cost = self._spread_points * lot_size * self._point_value * remaining_pct
+            commission_cost = self._commission_per_lot * lot_size * remaining_pct
 
         new_balance = balance + monetary_pnl - spread_cost - commission_cost
 
@@ -1404,6 +1457,19 @@ class IchimokuBacktester:
         else:
             pnl_points = trade.entry_price - exit_price
         gross_pnl = pnl_points * trade.lot_size * self._point_value * close_pct
+
+        if self._instrument_class == "futures":
+            commission_cost = (
+                self._commission_per_contract_rt * trade.lot_size * close_pct
+            )
+            slippage_cost = (
+                self._slippage_ticks
+                * self._tick_value_usd
+                * trade.lot_size
+                * close_pct
+            )
+            return gross_pnl - commission_cost - slippage_cost
+
         spread_cost = self._spread_points * trade.lot_size * self._point_value * close_pct
         commission_cost = self._commission_per_lot * trade.lot_size * close_pct
         return gross_pnl - spread_cost - commission_cost
