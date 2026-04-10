@@ -52,6 +52,49 @@ strategies:
     breakout_window_bars: 20
     rr_ratio: 2.0
 
+  fx_at_one_glance:
+    tf_mode: intraday            # swing|intraday|hybrid|scalp|hyperscalp_*
+    ichimoku:
+      tenkan_period: 9
+      kijun_period: 26
+      senkou_b_period: 52
+    adx:
+      period: 14
+      threshold: 20
+    atr:
+      period: 14
+      stop_multiplier: 2.5
+    cloud_balance:
+      enabled: true
+    kihon_suchi:
+      enabled: true
+      tolerance: 1
+    wave:
+      elliott_enabled: true
+    divergence:
+      enabled: true
+      oscillator: rsi
+    five_elements_mode: hard_gate
+    time_theory_mode: soft_filter
+    range_filter:
+      adx_min: 20
+      cloud_thickness_min_usd: 0.50
+    signal:
+      min_confluence_score: 6
+      min_tier: B
+    exit:
+      mode: hybrid
+      partial_close_pct: 50
+      primary_target: n_value
+      trail_with: fractal_kijun
+      no_be_before_r: 1.0
+      use_heikin_ashi: true
+    stop_loss:
+      preference: [fractal, kijun, kumo_edge]
+      kijun_buffer_pips: 5
+      max_stop_pips: 100
+      min_rr_ratio: 1.5
+
   sss:
     enabled: true
     weight: 1.0
