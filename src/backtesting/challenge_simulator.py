@@ -8,13 +8,18 @@ Tests how often a strategy config would pass a 2-step prop firm challenge
   across the backtest period, measuring pass rate at different entry points.
 - **Monte Carlo**: shuffle the trade sequence and replay the challenge many
   times, measuring robustness to ordering effects.
+
+For TopstepX-style combines (dollar-based, single-account), the simulator
+dispatches to :class:`TopstepCombineSimulator` instead of running the
+rolling/MC pipeline — a TopstepX combine is a single continuous account
+that either passes or fails, not a challenge replayed N times.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -417,8 +422,25 @@ class ChallengeSimulator:
         trades: List[dict],
         total_trading_days: int,
         n_mc_simulations: int = 1_000,
-    ) -> ChallengeSimulationResult:
-        """Run both rolling-window and Monte Carlo simulations, merge results."""
+        prop_firm_style: Optional[str] = None,
+        topstep_config: Optional[Any] = None,
+    ) -> Union[ChallengeSimulationResult, Any]:
+        """Run both rolling-window and Monte Carlo simulations, merge results.
+
+        When *prop_firm_style* is ``"topstep_combine_dollar"``, delegates
+        to :class:`TopstepCombineSimulator` and returns a
+        :class:`TopstepCombineResult` instead of the rolling/MC
+        aggregate — a TopstepX combine doesn't benefit from rolling-window
+        replay since it's a single continuous account.
+        """
+        if prop_firm_style == "topstep_combine_dollar":
+            from src.backtesting.topstep_simulator import TopstepCombineSimulator
+            from src.config.models import TopstepCombineConfig
+
+            cfg = topstep_config or TopstepCombineConfig()
+            sim = TopstepCombineSimulator(config=cfg)
+            return sim.run(trades)
+
         rolling = self.run_rolling(trades, total_trading_days)
         mc = self.run_monte_carlo(trades, n_simulations=n_mc_simulations)
 
