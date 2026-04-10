@@ -333,6 +333,14 @@ class InstrumentOverride(BaseModel):
     """Per-instrument parameter overrides applied on top of base strategy config."""
 
     symbol: str
+    provider: str | None = None
+    contract_id: str | None = None
+    symbol_id: str | None = None
+    tick_size: float | None = None
+    tick_value: float | None = None
+    price_scale: float | None = None
+    commission_per_contract: float | None = None
+    default_quantity: int | None = None
     # Optional field-level overrides; None means "use strategy default"
     adx_threshold: int | None = None
     spread_max_points: int | None = None
@@ -352,6 +360,37 @@ class InstrumentsConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Provider config models
+# ---------------------------------------------------------------------------
+
+
+class ProjectXConfig(BaseModel):
+    api_base_url: str = "https://api.topstepx.com"
+    user_hub_url: str = "https://rtc.thefuturesdesk.projectx.com/hubs/user"
+    market_hub_url: str = "https://rtc.thefuturesdesk.projectx.com/hubs/market"
+    username_env: str = "PROJECTX_USERNAME"
+    api_key_env: str = "PROJECTX_API_KEY"
+    account_id: int | None = None
+    live: bool = False
+    request_timeout_seconds: float = 30.0
+    default_contract_id: str | None = None
+    default_symbol_id: str | None = None
+    bar_limit: int = 500
+    token_refresh_buffer_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> "ProjectXConfig":
+        self.bar_limit = max(1, min(self.bar_limit, 20_000))
+        self.token_refresh_buffer_seconds = max(0, self.token_refresh_buffer_seconds)
+        return self
+
+
+class ProviderConfig(BaseModel):
+    provider: str = "projectx"
+    projectx: ProjectXConfig = Field(default_factory=ProjectXConfig)
+
+
+# ---------------------------------------------------------------------------
 # Root application config
 # ---------------------------------------------------------------------------
 
@@ -363,3 +402,4 @@ class AppConfig(BaseModel):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     instruments: InstrumentsConfig = Field(default_factory=InstrumentsConfig)
+    provider: ProviderConfig = Field(default_factory=ProviderConfig)

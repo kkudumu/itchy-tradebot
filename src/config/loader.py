@@ -25,6 +25,7 @@ from src.config.models import (
     DatabaseConfig,
     EdgeConfig,
     InstrumentsConfig,
+    ProviderConfig,
     StrategyConfig,
 )
 
@@ -64,7 +65,7 @@ class ConfigLoader:
         2. config/strategy.yaml
         3. config/database.yaml
         4. config/instruments.yaml
-        5. Per-instrument overrides embedded in instruments.yaml
+        5. config/provider.yaml
 
     Environment variable ``CONFIG_DIR`` overrides the default directory.
     """
@@ -87,12 +88,14 @@ class ConfigLoader:
         strategy_data = _load_yaml(self._dir / "strategy.yaml")
         database_data = _load_yaml(self._dir / "database.yaml")
         instruments_data = _load_yaml(self._dir / "instruments.yaml")
+        provider_data = _load_yaml(self._dir / "provider.yaml")
 
         return AppConfig(
             edges=EdgeConfig.model_validate(edges_data),
             strategy=StrategyConfig.model_validate(strategy_data),
             database=DatabaseConfig.model_validate(database_data),
             instruments=InstrumentsConfig.model_validate(instruments_data),
+            provider=ProviderConfig.model_validate(provider_data),
         )
 
     # ------------------------------------------------------------------

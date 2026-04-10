@@ -59,6 +59,18 @@ logger = logging.getLogger("run_demo_challenge")
 # =============================================================================
 
 
+def _load_local_env() -> None:
+    env_path = _PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="XAU/USD Ichimoku demo challenge orchestrator.",
@@ -94,6 +106,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Use synthetic data for quick testing (backtest mode only).",
+    )
+    p.add_argument(
+        "--data-source",
+        choices=["file", "synthetic", "projectx"],
+        default="file",
+        help="Data source for backtest/validate modes.",
     )
 
     # Backtest options
@@ -148,6 +166,54 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="MT5 broker server name (live mode).",
+    )
+    p.add_argument(
+        "--provider",
+        choices=["projectx", "mt5"],
+        default=None,
+        help="Execution provider for live mode. Defaults to config/provider.yaml.",
+    )
+    p.add_argument(
+        "--projectx-username",
+        type=str,
+        default=None,
+        help="ProjectX username override. Falls back to env/config.",
+    )
+    p.add_argument(
+        "--projectx-api-key",
+        type=str,
+        default=None,
+        help="ProjectX API key override. Falls back to env/config.",
+    )
+    p.add_argument(
+        "--projectx-account-id",
+        type=int,
+        default=None,
+        help="ProjectX account id override for live trading.",
+    )
+    p.add_argument(
+        "--projectx-contract-id",
+        type=str,
+        default=None,
+        help="ProjectX contract id override for live/historical use.",
+    )
+    p.add_argument(
+        "--projectx-symbol-id",
+        type=str,
+        default=None,
+        help="ProjectX symbol id override for live/historical use.",
+    )
+    p.add_argument(
+        "--projectx-start",
+        type=str,
+        default=None,
+        help="UTC ISO timestamp for ProjectX historical start, e.g. 2025-01-01T00:00:00Z.",
+    )
+    p.add_argument(
+        "--projectx-end",
+        type=str,
+        default=None,
+        help="UTC ISO timestamp for ProjectX historical end, e.g. 2025-03-01T00:00:00Z.",
     )
 
     # Output
@@ -245,6 +311,46 @@ def _generate_synthetic_data(n: int = 10_000, seed: int = 42) -> pd.DataFrame:
     return df
 
 
+def _parse_utc_timestamp(value: str) -> datetime:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts.to_pydatetime()
+
+
+def _load_projectx_data(args: argparse.Namespace, app_config) -> pd.DataFrame:
+    """Load historical bars from ProjectX for backtest/validate modes."""
+    if not args.projectx_start or not args.projectx_end:
+        raise ValueError("ProjectX historical loading requires --projectx-start and --projectx-end")
+
+    from src.providers import ProjectXHistoricalDataLoader, build_projectx_stack
+
+    projectx_cfg = app_config.provider.projectx.model_copy(deep=True)
+    if args.projectx_contract_id:
+        projectx_cfg.default_contract_id = args.projectx_contract_id
+    if args.projectx_symbol_id:
+        projectx_cfg.default_symbol_id = args.projectx_symbol_id
+
+    _, market_provider, _, _ = build_projectx_stack(
+        config=projectx_cfg,
+        instruments=app_config.instruments,
+        username=args.projectx_username,
+        api_key=args.projectx_api_key,
+    )
+    loader = ProjectXHistoricalDataLoader(market_provider)
+    start_dt = _parse_utc_timestamp(args.projectx_start)
+    end_dt = _parse_utc_timestamp(args.projectx_end)
+    logger.info("Loading ProjectX data for %s from %s to %s", args.instrument, start_dt, end_dt)
+    return loader.load_range(
+        instrument=args.instrument,
+        timeframe="1M",
+        start_time=start_dt,
+        end_time=end_dt,
+    )
+
+
 # =============================================================================
 # Pipeline: BACKTEST mode
 # =============================================================================
@@ -257,19 +363,6 @@ def run_backtest(args: argparse.Namespace) -> int:
     """
     logger.info("=== BACKTEST MODE ===")
 
-    # Load data
-    try:
-        if args.synthetic_data:
-            candles = _generate_synthetic_data(seed=args.seed or 42)
-        elif args.data_file:
-            candles = _load_data_file(args.data_file)
-        else:
-            logger.error("Backtest mode requires --data-file or --synthetic-data")
-            return 1
-    except Exception as exc:
-        logger.error("Data loading failed: %s", exc)
-        return 1
-
     # Load config
     try:
         from src.config.loader import ConfigLoader
@@ -279,6 +372,27 @@ def run_backtest(args: argparse.Namespace) -> int:
         logger.info("Config loaded from %s", loader.config_dir)
     except Exception as exc:
         logger.error("Config loading failed: %s", exc)
+        return 1
+
+    # Load data
+    try:
+        data_source = args.data_source
+        if args.synthetic_data:
+            data_source = "synthetic"
+        elif args.data_file and args.data_source == "file":
+            data_source = "file"
+
+        if data_source == "synthetic":
+            candles = _generate_synthetic_data(seed=args.seed or 42)
+        elif data_source == "projectx":
+            candles = _load_projectx_data(args, app_config)
+        elif args.data_file:
+            candles = _load_data_file(args.data_file)
+        else:
+            logger.error("Backtest mode requires --data-file, --synthetic-data, or --data-source projectx")
+            return 1
+    except Exception as exc:
+        logger.error("Data loading failed: %s", exc)
         return 1
 
     # Start live dashboard server
@@ -445,14 +559,29 @@ def run_validate(args: argparse.Namespace) -> int:
     """
     logger.info("=== VALIDATE MODE ===")
 
+    try:
+        from src.config.loader import ConfigLoader
+
+        config_dir = args.config or None
+        app_config = ConfigLoader(config_dir=config_dir).load()
+    except Exception as exc:
+        logger.error("Config loading failed: %s", exc)
+        return 1
+
     # Load data
     try:
+        data_source = args.data_source
         if args.synthetic_data:
+            data_source = "synthetic"
+
+        if data_source == "synthetic":
             candles = _generate_synthetic_data(seed=args.seed or 42)
+        elif data_source == "projectx":
+            candles = _load_projectx_data(args, app_config)
         elif args.data_file:
             candles = _load_data_file(args.data_file)
         else:
-            logger.error("Validate mode requires --data-file or --synthetic-data")
+            logger.error("Validate mode requires --data-file, --synthetic-data, or --data-source projectx")
             return 1
     except Exception as exc:
         logger.error("Data loading failed: %s", exc)
@@ -522,20 +651,8 @@ def run_validate(args: argparse.Namespace) -> int:
 
 
 def run_live(args: argparse.Namespace) -> int:
-    """Connect to MT5 and run the live signal engine.
-
-    MetaTrader5 is only available on Windows.  This function will fail
-    gracefully with an informative error on Linux.
-
-    Returns 0 on clean shutdown, 1 on connection / execution failure.
-    """
+    """Connect to the configured provider and run the live signal engine."""
     logger.info("=== LIVE MODE ===")
-
-    if not args.mt5_login or not args.mt5_password or not args.mt5_server:
-        logger.error(
-            "Live mode requires --mt5-login, --mt5-password, and --mt5-server"
-        )
-        return 1
 
     # Build components
     try:
@@ -546,27 +663,65 @@ def run_live(args: argparse.Namespace) -> int:
         logger.error("Config loading failed: %s", exc)
         return 1
 
-    # Connect MT5
-    try:
-        from src.execution.mt5_bridge import MT5Bridge
+    provider_name = args.provider or app_config.provider.provider or "projectx"
+    market_data_provider = None
+    execution_provider = None
+    account_provider = None
+    point_value = 1.0
+    bridge = None
 
-        bridge = MT5Bridge(
-            login=args.mt5_login,
-            password=args.mt5_password,
-            server=args.mt5_server,
-        )
-        if not bridge.connect():
-            logger.error("MT5 connection failed")
-            return 1
-        logger.info("MT5 connected to %s", args.mt5_server)
-    except ImportError:
-        logger.error(
-            "MetaTrader5 package not available. "
-            "Live mode requires a Windows host with MT5 installed."
-        )
-        return 1
+    # Connect provider
+    try:
+        if provider_name == "mt5":
+            if not args.mt5_login or not args.mt5_password or not args.mt5_server:
+                logger.error(
+                    "MT5 live mode requires --mt5-login, --mt5-password, and --mt5-server"
+                )
+                return 1
+
+            from src.execution.mt5_bridge import MT5Bridge
+            from src.execution.order_manager import OrderManager
+            from src.execution.account_monitor import AccountMonitor
+            from src.providers import MT5AccountProvider, MT5ExecutionProvider, MT5MarketDataProvider
+
+            bridge = MT5Bridge(
+                login=args.mt5_login,
+                password=args.mt5_password,
+                server=args.mt5_server,
+            )
+            if not bridge.connect():
+                logger.error("MT5 connection failed")
+                return 1
+
+            market_data_provider = MT5MarketDataProvider(bridge)
+            execution_provider = MT5ExecutionProvider(OrderManager(bridge=bridge))
+            account_provider = MT5AccountProvider(AccountMonitor(bridge=bridge))
+            spec = market_data_provider.get_contract_spec(args.instrument)
+            point_value = float(spec.point_value or point_value)
+            logger.info("MT5 connected to %s", args.mt5_server)
+        else:
+            from src.providers import build_projectx_stack
+
+            projectx_cfg = app_config.provider.projectx.model_copy(deep=True)
+            if args.projectx_account_id is not None:
+                projectx_cfg.account_id = args.projectx_account_id
+            if args.projectx_contract_id:
+                projectx_cfg.default_contract_id = args.projectx_contract_id
+            if args.projectx_symbol_id:
+                projectx_cfg.default_symbol_id = args.projectx_symbol_id
+            projectx_cfg.live = True
+
+            _, market_data_provider, execution_provider, account_provider = build_projectx_stack(
+                config=projectx_cfg,
+                instruments=app_config.instruments,
+                username=args.projectx_username,
+                api_key=args.projectx_api_key,
+            )
+            spec = market_data_provider.get_contract_spec(args.instrument)
+            point_value = float(spec.point_value or point_value)
+            logger.info("ProjectX live provider ready for %s (%s)", args.instrument, spec.contract_id)
     except Exception as exc:
-        logger.exception("MT5 connection error: %s", exc)
+        logger.exception("Provider connection error: %s", exc)
         return 1
 
     # Build engine
@@ -580,7 +735,6 @@ def run_live(args: argparse.Namespace) -> int:
         from src.learning.embeddings import EmbeddingEngine
         from src.learning.similarity import SimilaritySearch
         from src.zones.manager import ZoneManager
-        from src.execution.order_manager import OrderManager
         from src.engine.decision_engine import DecisionEngine
 
         signal_engine = SignalEngine(instrument=args.instrument)
@@ -596,18 +750,19 @@ def run_live(args: argparse.Namespace) -> int:
         embedding_engine = EmbeddingEngine()
         similarity = SimilaritySearch(db_pool=None)
         zone_manager = ZoneManager()
-        order_manager = OrderManager(bridge=bridge)
 
         engine = DecisionEngine(
-            config={"instrument": args.instrument},
+            config={"instrument": args.instrument, "point_value": point_value},
             signal_engine=signal_engine,
             edge_manager=edge_manager,
             trade_manager=trade_mgr,
             similarity_search=similarity,
             embedding_engine=embedding_engine,
             zone_manager=zone_manager,
+            market_data_provider=market_data_provider,
+            execution_provider=execution_provider,
+            account_provider=account_provider,
             mt5_bridge=bridge,
-            order_manager=order_manager,
         )
 
         logger.info("Live engine initialised — starting scan loop")
@@ -619,10 +774,11 @@ def run_live(args: argparse.Namespace) -> int:
         logger.exception("Live engine error: %s", exc)
         return 1
     finally:
-        try:
-            bridge.disconnect()
-        except Exception:
-            pass
+        if bridge is not None:
+            try:
+                bridge.disconnect()
+            except Exception:
+                pass
 
     return 0
 
@@ -633,6 +789,7 @@ def run_live(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    _load_local_env()
     parser = _build_parser()
     args = parser.parse_args()
 

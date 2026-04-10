@@ -13,6 +13,7 @@ from src.config.models import (
     AppConfig,
     EdgeConfig,
     InstrumentsConfig,
+    ProviderConfig,
     StrategyConfig,
 )
 
@@ -58,6 +59,7 @@ class TestLoadConfig:
         assert isinstance(cfg.edges, EdgeConfig)
         assert isinstance(cfg.strategy, StrategyConfig)
         assert isinstance(cfg.instruments, InstrumentsConfig)
+        assert isinstance(cfg.provider, ProviderConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +150,7 @@ class TestEdgeToggles:
         e = self._cfg.edges.time_stop
         assert e.enabled is False
         assert e.params["candle_limit"] == 12
+        assert e.params["breakeven_r_threshold"] == pytest.approx(0.5)
 
     def test_bb_squeeze_defaults(self) -> None:
         e = self._cfg.edges.bb_squeeze
@@ -162,7 +165,7 @@ class TestEdgeToggles:
 
     def test_equity_curve_defaults(self) -> None:
         e = self._cfg.edges.equity_curve
-        assert e.enabled is True  # Enabled: reduces size when equity dips below MA
+        assert e.enabled is False  # Disabled by default in edges.yaml
         assert e.params["lookback_trades"] == 20
 
     def test_toggle_edge_off_via_yaml(self, tmp_config_dir: Path) -> None:
@@ -196,11 +199,11 @@ class TestStrategyConfig:
 
     def test_risk_params(self) -> None:
         risk = self._cfg.strategy.risk
-        assert risk.initial_risk_pct == pytest.approx(1.5)
+        assert risk.initial_risk_pct == pytest.approx(0.5)
         assert risk.reduced_risk_pct == pytest.approx(0.75)
         assert risk.phase_threshold_pct == pytest.approx(4.0)
         assert risk.daily_circuit_breaker_pct == pytest.approx(4.5)
-        assert risk.max_concurrent_positions == 1
+        assert risk.max_concurrent_positions == 3
 
     def test_exit_params(self) -> None:
         ex = self._cfg.strategy.exit
@@ -211,10 +214,10 @@ class TestStrategyConfig:
 
     def test_signal_tiers(self) -> None:
         sig = self._cfg.strategy.signal
-        assert sig.min_confluence_score == 2
+        assert sig.min_confluence_score == 1
         assert sig.tier_a_plus == 7
         assert sig.tier_b == 5
-        assert sig.tier_c == 2
+        assert sig.tier_c == 1
 
     def test_signal_timeframes(self) -> None:
         tf = self._cfg.strategy.signal.timeframes
@@ -239,6 +242,7 @@ class TestInstrumentsConfig:
     def test_xauusd_symbol(self) -> None:
         inst = self._cfg.instruments.get("XAUUSD")
         assert inst.symbol == "XAUUSD"
+        assert inst.provider == "projectx"
 
     def test_unknown_symbol_returns_none(self) -> None:
         assert self._cfg.instruments.get("EURUSD") is None
@@ -279,3 +283,8 @@ class TestConfigLoader:
         assert cfg2.strategy.ichimoku.tenkan_period == 7
         # First load should still show the default (9)
         assert cfg1.strategy.ichimoku.tenkan_period == 9
+
+    def test_provider_yaml_is_loaded(self, project_config_dir: Path) -> None:
+        cfg = load_config(config_dir=project_config_dir)
+        assert cfg.provider.provider == "projectx"
+        assert cfg.provider.projectx.api_base_url.startswith("https://api.")

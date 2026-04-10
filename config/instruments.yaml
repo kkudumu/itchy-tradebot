@@ -4,6 +4,12 @@
 
 instruments:
   - symbol: "XAUUSD"
+    provider: "projectx"
+    default_quantity: 1
+    contract_id: "CON.F.US.MGC.M26"
+    symbol_id: "F.US.MGC"
+    tick_size: 0.1
+    tick_value: 1.0
     # Gold requires a wider ADX threshold to avoid choppy conditions
     adx_threshold: 28
     # Max acceptable spread in points (30 pts = $0.30/oz at standard lot)
