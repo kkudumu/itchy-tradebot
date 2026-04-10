@@ -13,7 +13,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,37 @@ logger = logging.getLogger(__name__)
 
 # Trading days per year used for annualisation
 _TRADING_DAYS_PER_YEAR: float = 252.0
+
+
+# =============================================================================
+# PropFirmTrackerProtocol — structural interface for pluggable trackers
+# =============================================================================
+
+
+@runtime_checkable
+class PropFirmTrackerProtocol(Protocol):
+    """Common interface for prop firm trackers.
+
+    Implementations: ``PropFirmTracker`` (legacy single-phase pct),
+    ``MultiPhasePropFirmTracker`` (the5ers 2-step pct),
+    ``TopstepCombineTracker`` (TopstepX dollar-based trailing).
+
+    The engine holds a single reference of this type and calls
+    ``initialise`` / ``update`` / ``check_pass`` / ``to_dict`` without
+    knowing which concrete implementation it's dealing with.
+    """
+
+    def initialise(self, initial_balance: float, first_ts: datetime) -> None:
+        ...
+
+    def update(self, ts: datetime, balance: float) -> None:
+        ...
+
+    def check_pass(self) -> Any:  # returns PropFirmStatus or dict
+        ...
+
+    def to_dict(self) -> Dict[str, Any]:
+        ...
 
 
 # =============================================================================
@@ -194,6 +225,24 @@ class PropFirmTracker:
                 "daily_drawdowns": daily_dd_details,
             },
         )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a dict snapshot suitable for JSON / parquet serialization.
+
+        Mirrors the :class:`PropFirmTrackerProtocol` so the engine can
+        call ``to_dict()`` uniformly regardless of which concrete
+        tracker is active.
+        """
+        status = self.check_pass()
+        return {
+            "style": "legacy_single_phase_pct",
+            "status": status.status,
+            "profit_pct": status.profit_pct,
+            "max_daily_dd_pct": status.max_daily_dd_pct,
+            "max_total_dd_pct": status.max_total_dd_pct,
+            "days_elapsed": status.days_elapsed,
+            "details": status.details,
+        }
 
     def daily_dd_series(self) -> pd.Series:
         """Return a Series of daily drawdowns indexed by date string.
@@ -465,6 +514,27 @@ class MultiPhasePropFirmTracker:
 
         # Always update the running "previous close equity" for next bar
         self._prev_day_close_equity = equity
+
+    def check_pass(self) -> dict:
+        """Protocol-compatible alias for :meth:`get_status`.
+
+        Returns the same dict as ``get_status()`` so external callers
+        can rely on the uniform :class:`PropFirmTrackerProtocol` name.
+        """
+        return self.get_status()
+
+    def to_dict(self) -> dict:
+        """Return a dict snapshot suitable for JSON / parquet serialization.
+
+        Mirrors the :class:`PropFirmTrackerProtocol` signature so the
+        engine can call ``to_dict()`` uniformly regardless of which
+        concrete tracker is active.
+        """
+        status = self.get_status()
+        return {
+            "style": "the5ers_pct_phased",
+            **status,
+        }
 
     def get_status(self) -> dict:
         """Return a dict describing the current tracker state."""

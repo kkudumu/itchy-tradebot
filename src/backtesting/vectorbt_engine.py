@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -201,7 +202,10 @@ class IchimokuBacktester:
             stats_analyzer=self._memory_stats,
         )
 
-        # Prop firm tracker (legacy single-phase)
+        # Prop firm tracker selection — dispatches on prop_firm.style.
+        # The legacy PropFirmTracker (single-phase pct) remains as a
+        # fallback for callers that pass explicit pct targets via
+        # __init__ kwargs, because existing test fixtures rely on it.
         self.prop_firm_tracker = PropFirmTracker(
             profit_target_pct=prop_firm_profit_target_pct,
             max_daily_dd_pct=prop_firm_max_daily_dd_pct,
@@ -209,23 +213,61 @@ class IchimokuBacktester:
             time_limit_days=prop_firm_time_limit_days,
         )
 
-        # Multi-phase prop firm tracker (The5ers 2-Step)
-        prop_firm_cfg = cfg.get("prop_firm", {})
-        p1 = prop_firm_cfg.get("phase_1", {})
-        p2 = prop_firm_cfg.get("phase_2", {})
-        funded = prop_firm_cfg.get("funded", {})
-        self.multi_phase_tracker = MultiPhasePropFirmTracker(
-            account_size=float(prop_firm_cfg.get("account_size", initial_balance)),
-            phase_1_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
-            phase_1_max_loss_pct=float(p1.get("max_loss_pct", 10.0)),
-            phase_1_daily_loss_pct=float(p1.get("daily_loss_pct", 5.0)),
-            phase_2_profit_target_pct=float(p2.get("profit_target_pct", 5.0)),
-            phase_2_max_loss_pct=float(p2.get("max_loss_pct", 10.0)),
-            phase_2_daily_loss_pct=float(p2.get("daily_loss_pct", 5.0)),
-            funded_monthly_target_pct=float(funded.get("monthly_target_pct", 10.0)),
-            funded_max_loss_pct=float(funded.get("max_loss_pct", 10.0)),
-            funded_daily_loss_pct=float(funded.get("daily_loss_pct", 5.0)),
-        )
+        prop_firm_cfg = cfg.get("prop_firm", {}) or {}
+        prop_firm_style = prop_firm_cfg.get("style", "the5ers_pct_phased")
+        self._prop_firm_style = prop_firm_style
+
+        # Active tracker — the one the engine's main loop calls update() on.
+        # Starts as the legacy PropFirmTracker for backward compat; replaced
+        # below when a style discriminator is present.
+        self.active_prop_firm_tracker = self.prop_firm_tracker
+
+        # TopstepX Combine path — dollar-based trailing MLL
+        if prop_firm_style == "topstep_combine_dollar":
+            from src.risk.session_clock import SessionClock
+            from src.risk.topstep_tracker import TopstepCombineTracker
+            from src.config.models import TopstepCombineConfig
+
+            tx_kwargs = {
+                k: v for k, v in prop_firm_cfg.items() if k != "style"
+            }
+            tx_config = TopstepCombineConfig(**tx_kwargs)
+            self.topstep_tracker = TopstepCombineTracker(config=tx_config)
+            self.active_prop_firm_tracker = self.topstep_tracker
+            # The5ers tracker is unused in topstep mode but we keep a
+            # safe default instance for backward compat on any legacy
+            # call sites that still reference it.
+            self.multi_phase_tracker = None
+            # SessionClock for 5pm CT day rollover in the circuit breaker
+            self._session_clock = SessionClock(
+                reset_hour_local=int(tx_config.daily_reset_hour),
+                reset_tz=tx_config.daily_reset_tz,
+            )
+            # Rebuild the circuit breaker with dollar-based daily loss
+            # limit + session clock
+            self.trade_manager._breaker = DailyCircuitBreaker(
+                max_daily_loss_usd=float(tx_config.daily_loss_limit_usd),
+                session_clock=self._session_clock,
+            )
+        else:
+            # Legacy the5ers 2-step / single-phase pct path — unchanged
+            self.topstep_tracker = None
+            self._session_clock = None
+            p1 = prop_firm_cfg.get("phase_1", {}) or {}
+            p2 = prop_firm_cfg.get("phase_2", {}) or {}
+            funded = prop_firm_cfg.get("funded", {}) or {}
+            self.multi_phase_tracker = MultiPhasePropFirmTracker(
+                account_size=float(prop_firm_cfg.get("account_size", initial_balance)),
+                phase_1_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
+                phase_1_max_loss_pct=float(p1.get("max_loss_pct", 10.0)),
+                phase_1_daily_loss_pct=float(p1.get("daily_loss_pct", 5.0)),
+                phase_2_profit_target_pct=float(p2.get("profit_target_pct", 5.0)),
+                phase_2_max_loss_pct=float(p2.get("max_loss_pct", 10.0)),
+                phase_2_daily_loss_pct=float(p2.get("daily_loss_pct", 5.0)),
+                funded_monthly_target_pct=float(funded.get("monthly_target_pct", 10.0)),
+                funded_max_loss_pct=float(funded.get("max_loss_pct", 10.0)),
+                funded_daily_loss_pct=float(funded.get("daily_loss_pct", 5.0)),
+            )
 
         self._metrics_calc = PerformanceMetrics()
 
@@ -267,6 +309,15 @@ class IchimokuBacktester:
                 self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
 
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
+
+        # Strategy telemetry collector — captures every signal event,
+        # filter rejection, and trade exit for downstream analysis and
+        # mega-vision training data.
+        from src.backtesting.strategy_telemetry import StrategyTelemetryCollector
+
+        self.telemetry = StrategyTelemetryCollector(
+            run_id=cfg.get("run_id", "backtest")
+        )
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -356,9 +407,13 @@ class IchimokuBacktester:
         active_context: Optional[dict] = None
         candles_since_entry: int = 0
 
-        # Prop firm tracker init
+        # Prop firm tracker init — always initialise the legacy tracker
+        # (it's read by the final BacktestResult for backward compat)
+        # AND the active tracker when they differ (e.g. TopstepX mode).
         first_ts = pd.Timestamp(df_5m.index[0]).to_pydatetime()
         self.prop_firm_tracker.initialise(self._initial_balance, first_ts)
+        if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+            self.active_prop_firm_tracker.initialise(self._initial_balance, first_ts)
 
         # Circuit breaker — set up first day
         prev_date = None
@@ -427,6 +482,8 @@ class IchimokuBacktester:
             if np.isnan(close):
                 equity_records.append((ts, balance))
                 self.prop_firm_tracker.update(ts, balance)
+                if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+                    self.active_prop_firm_tracker.update(ts, balance)
                 continue
 
             # Retrieve higher-TF values aligned to this 5M bar
@@ -742,6 +799,8 @@ class IchimokuBacktester:
             # Record equity at this bar
             equity_records.append((ts, balance))
             self.prop_firm_tracker.update(ts, balance)
+            if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+                self.active_prop_firm_tracker.update(ts, balance)
 
             # ── Checkpoint: early abort if strategy is clearly broken ──
             _CHECKPOINT_INTERVAL = 25_000  # Check every ~25K 5M bars (~1 month)
@@ -1002,6 +1061,16 @@ class IchimokuBacktester:
 
         prop_status = self.prop_firm_tracker.check_pass()
 
+        # When running under a non-legacy tracker (e.g. TopstepX), the
+        # active tracker is authoritative for the final verdict. Expose
+        # its dict snapshot alongside the legacy pct-status dict.
+        active_tracker_dict: Optional[dict] = None
+        if self.active_prop_firm_tracker is not self.prop_firm_tracker:
+            try:
+                active_tracker_dict = self.active_prop_firm_tracker.to_dict()
+            except Exception as exc:
+                logger.warning("active tracker to_dict failed: %s", exc)
+
         # ------------------------------------------------------------------
         # Challenge simulation (Monte Carlo + rolling window)
         # ------------------------------------------------------------------
@@ -1048,18 +1117,50 @@ class IchimokuBacktester:
             learning_skipped,
         )
 
+        prop_firm_dict: Dict[str, Any] = {
+            "status": prop_status.status,
+            "profit_pct": prop_status.profit_pct,
+            "max_daily_dd_pct": prop_status.max_daily_dd_pct,
+            "max_total_dd_pct": prop_status.max_total_dd_pct,
+            "days_elapsed": prop_status.days_elapsed,
+            "details": prop_status.details,
+        }
+        if active_tracker_dict is not None:
+            # Merge in the active tracker's snapshot under a separate
+            # key so both the legacy pct view and the active tracker
+            # (e.g. TopstepX dollar view) are available to consumers.
+            prop_firm_dict["style"] = active_tracker_dict.get("style", "unknown")
+            prop_firm_dict["active_tracker"] = active_tracker_dict
+            # Override top-level status with the active tracker's status
+            # when it's further along (failed beats pending, etc.)
+            active_status = active_tracker_dict.get("status")
+            if active_status and active_status != "pending":
+                prop_firm_dict["status"] = active_status
+
+        # Flush telemetry to disk — caller can control the path via
+        # cfg["telemetry_output_dir"] or we fall back to reports/<run_id>/.
+        try:
+            telem_dir = Path(
+                self._config.get("telemetry_output_dir")
+                or f"reports/{self.telemetry.run_id}"
+            )
+            telem_dir.mkdir(parents=True, exist_ok=True)
+            self.telemetry.to_parquet(telem_dir / "strategy_telemetry.parquet")
+            self.telemetry.to_summary_json(telem_dir / "strategy_telemetry_summary.json")
+            logger.info(
+                "Strategy telemetry: %d events written to %s",
+                self.telemetry.event_count,
+                telem_dir,
+            )
+            self.telemetry.log_console_summary()
+        except Exception as exc:
+            logger.warning("Telemetry flush failed: %s", exc)
+
         return BacktestResult(
             trades=closed_trades,
             metrics=metrics,
             equity_curve=equity_curve,
-            prop_firm={
-                "status": prop_status.status,
-                "profit_pct": prop_status.profit_pct,
-                "max_daily_dd_pct": prop_status.max_daily_dd_pct,
-                "max_total_dd_pct": prop_status.max_total_dd_pct,
-                "days_elapsed": prop_status.days_elapsed,
-                "details": prop_status.details,
-            },
+            prop_firm=prop_firm_dict,
             daily_pnl=daily_pnl,
             skipped_signals=skipped_signals,
             total_signals=total_signals,
