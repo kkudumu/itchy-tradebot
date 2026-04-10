@@ -18,10 +18,12 @@ from .base import (
 
 # Timeframe resample rules (matching existing MTFAnalyzer convention)
 _TF_RULES: dict[str, str] = {
+    "1M":  "1min",
     "5M":  "5min",
     "15M": "15min",
     "1H":  "1h",
     "4H":  "4h",
+    "D":   "1D",
 }
 
 
