@@ -325,6 +325,9 @@ class IchimokuBacktester:
         self._active_strategies: List[tuple] = []
         strategy_configs = cfg.get("strategies", {}) if isinstance(cfg.get("strategies"), dict) else {}
 
+        # Coordinator-based strategies (use EvalMatrix instead of on_bar)
+        self._coordinator_strategies: List[tuple] = []
+
         for name in active_strategy_names:
             if name == "ichimoku":
                 pass  # Existing signal_engine handles ichimoku via _scan_for_signal
@@ -341,6 +344,17 @@ class IchimokuBacktester:
                 # fed every bar, same as asian_breakout / ema_pullback.
                 sss_config = strategy_configs.get("sss", {})
                 self._active_strategies.append(("sss", SSSStrategy(config=sss_config)))
+            elif name == "fx_at_one_glance":
+                from src.strategy.strategies.fx_at_one_glance import FXAtOneGlance
+                from src.strategy.coordinator import EvaluatorCoordinator
+                import src.strategy.evaluators  # noqa: F401 — populate registry
+                fxaog_cfg = strategy_configs.get("fx_at_one_glance", {})
+                fxaog = FXAtOneGlance(config=fxaog_cfg)
+                fxaog_coord = EvaluatorCoordinator(
+                    fxaog.required_evaluators,
+                    warmup_bars=fxaog.warmup_bars,
+                )
+                self._coordinator_strategies.append(("fx_at_one_glance", fxaog, fxaog_coord))
 
         self._signal_blender = SignalBlender(multi_agree_bonus=2)
 
@@ -573,6 +587,39 @@ class IchimokuBacktester:
                                     getattr(_sig, "confluence_score", 0) or 0
                                 ),
                                 pattern_type=getattr(_sig, "pattern_type", None),
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # Coordinator-based strategies (e.g. fx_at_one_glance)
+            for _csn, _cstrat, _ccoord in self._coordinator_strategies:
+                try:
+                    # Slice 1M data up to current timestamp
+                    _end_loc = self._candles_1m.index.searchsorted(ts, side="right")
+                    _data_slice = self._candles_1m.iloc[:_end_loc]
+                    if len(_data_slice) < _cstrat.warmup_bars:
+                        continue
+                    _matrix = _ccoord.evaluate(_data_slice, current_bar=-1)
+                    if _matrix is None:
+                        continue
+                    _csig = _cstrat.decide(_matrix)
+                    if _csig is not None:
+                        _csig.strategy_name = _csn
+                        _bar_strategy_signals.append(_csig)
+                        _pipeline_counts["signals_generated"] += 1
+                        try:
+                            self.telemetry.emit_signal_generated(
+                                ts, _csn,
+                                direction=getattr(_csig, "direction", None),
+                                price=getattr(_csig, "entry_price", None) or close,
+                                atr=float(getattr(_csig, "atr", 0.0) or 0.0),
+                                adx=0.0,
+                                confluence_score=float(
+                                    getattr(_csig, "confluence_score", 0) or 0
+                                ),
+                                pattern_type=_csig.reasoning.get("trade_type"),
                             )
                         except Exception:
                             pass

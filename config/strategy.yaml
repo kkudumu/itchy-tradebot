@@ -53,7 +53,7 @@ strategies:
     rr_ratio: 2.0
 
   fx_at_one_glance:
-    tf_mode: intraday            # swing|intraday|hybrid|scalp|hyperscalp_*
+    tf_mode: hyperscalp_m15_m5   # swing|intraday|hybrid|scalp|hyperscalp_*
     ichimoku:
       tenkan_period: 9
       kijun_period: 26
@@ -183,8 +183,10 @@ prop_firm:
 #     dispatcher in src/backtesting/vectorbt_engine.py. Lists every
 #     strategy the backtest should blend.
 # ------------------------------------------------------------------
+# Temporarily isolated for FXAOG backtest — restore full blend after
 active_strategies:
-  - ichimoku
-  - asian_breakout
-  - ema_pullback
-  - sss
+  - fx_at_one_glance
+#  - ichimoku
+#  - asian_breakout
+#  - ema_pullback
+#  - sss
