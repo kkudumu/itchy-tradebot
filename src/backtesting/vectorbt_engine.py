@@ -492,8 +492,14 @@ class IchimokuBacktester:
         if live_dashboard is not None:
             live_dashboard.update({
                 "total_bars": _total_5m_bars,
+                "equity": round(self._initial_balance, 2),
                 "initial_balance": self._initial_balance,
+                "equity_history": [round(self._initial_balance, 2)],
+                "balance_pct": 0.0,
+                "total_return_pct": 0.0,
+                "prop_profit_pct": 0.0,
                 "instrument": instrument,
+                "current_timestamp": first_ts.isoformat(),
                 "data_start_date": str(df_5m.index[0]) if len(df_5m) > 0 else "",
                 "data_end_date": str(df_5m.index[-1]) if len(df_5m) > 0 else "",
             })
@@ -501,7 +507,7 @@ class IchimokuBacktester:
         # 2.5. Pre-flight health check
         # Pre-flight only scans Ichimoku signals. When other strategies are active,
         # don't let a failed pre-flight halt the entire backtest.
-        has_non_ichimoku = len(self._active_strategies) > 0
+        has_non_ichimoku = len(self._active_strategies) > 0 or len(self._coordinator_strategies) > 0
         if has_non_ichimoku:
             logger.info("Skipping Ichimoku-only pre-flight — non-Ichimoku strategies are active.")
         else:
@@ -596,9 +602,12 @@ class IchimokuBacktester:
             # Coordinator-based strategies (e.g. fx_at_one_glance)
             for _csn, _cstrat, _ccoord in self._coordinator_strategies:
                 try:
-                    # Slice 1M data up to current timestamp
+                    # Slice 1M data: only keep last 2000 bars (enough for
+                    # warmup + highest TF resampling) to avoid resampling
+                    # the entire history every bar.
                     _end_loc = self._candles_1m.index.searchsorted(ts, side="right")
-                    _data_slice = self._candles_1m.iloc[:_end_loc]
+                    _start_loc = max(0, _end_loc - 2000)
+                    _data_slice = self._candles_1m.iloc[_start_loc:_end_loc]
                     if len(_data_slice) < _cstrat.warmup_bars:
                         continue
                     _matrix = _ccoord.evaluate(_data_slice, current_bar=-1)
