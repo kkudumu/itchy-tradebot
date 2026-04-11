@@ -612,7 +612,11 @@ class IchimokuBacktester:
                         continue
                     _matrix = _ccoord.evaluate(_data_slice, current_bar=-1)
                     if _matrix is None:
+                        _pipeline_counts.setdefault("coord_matrix_none", 0)
+                        _pipeline_counts["coord_matrix_none"] += 1
                         continue
+                    _pipeline_counts.setdefault("coord_matrix_ok", 0)
+                    _pipeline_counts["coord_matrix_ok"] += 1
                     _csig = _cstrat.decide(_matrix)
                     if _csig is not None:
                         _csig.strategy_name = _csn
@@ -1097,7 +1101,8 @@ class IchimokuBacktester:
         # ------------------------------------------------------------------
         logger.info(
             "Pipeline: generated=%d | filtered_in_trade=%d | filtered_no_open=%d | "
-            "filtered_edge=%d | filtered_learning=%d | filtered_open_rejected=%d | entered=%d",
+            "filtered_edge=%d | filtered_learning=%d | filtered_open_rejected=%d | entered=%d | "
+            "coord_matrix_ok=%d | coord_matrix_none=%d",
             _pipeline_counts["signals_generated"],
             _pipeline_counts["signals_filtered_in_trade"],
             _pipeline_counts["signals_filtered_no_open"],
@@ -1105,6 +1110,8 @@ class IchimokuBacktester:
             _pipeline_counts["signals_filtered_learning"],
             _pipeline_counts["signals_filtered_open_rejected"],
             _pipeline_counts["signals_entered"],
+            _pipeline_counts.get("coord_matrix_ok", 0),
+            _pipeline_counts.get("coord_matrix_none", 0),
         )
 
         # ------------------------------------------------------------------
