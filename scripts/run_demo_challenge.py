@@ -118,8 +118,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--initial-balance",
         type=float,
-        default=10_000.0,
-        help="Starting account balance for backtest/optimize.",
+        default=None,
+        help="Starting account balance (default: reads prop_firm.account_size from config).",
     )
     p.add_argument(
         "--instrument",
@@ -439,9 +439,12 @@ def run_backtest(args: argparse.Namespace) -> int:
         p1 = prop.get("phase_1", {})
         bt_config["prop_firm"] = prop
 
+        # Resolve initial balance: CLI flag > prop_firm.account_size > 10K fallback
+        _balance = args.initial_balance or prop.get("account_size", 10_000.0)
+
         backtester = IchimokuBacktester(
             config=bt_config,
-            initial_balance=args.initial_balance,
+            initial_balance=_balance,
             prop_firm_profit_target_pct=float(p1.get("profit_target_pct", 8.0)),
             prop_firm_max_daily_dd_pct=float(p1.get("daily_loss_pct", 5.0)),
             prop_firm_max_total_dd_pct=float(p1.get("max_loss_pct", 10.0)),
@@ -523,7 +526,7 @@ def run_backtest(args: argparse.Namespace) -> int:
         dash_path = dashboard.save_and_open(
             result=result,
             output_dir=args.output_dir,
-            initial_balance=args.initial_balance,
+            initial_balance=_balance,
             learning_phase=learning_phase,
             learning_skipped=0,
             instrument=args.instrument,
@@ -598,7 +601,7 @@ def run_validate(args: argparse.Namespace) -> int:
 
         validator = GoNoGoValidator(
             data=candles,
-            initial_balance=args.initial_balance,
+            initial_balance=_balance,
             haircut_pct=args.haircut,
         )
         validation_result = validator.run_full_validation(
@@ -739,7 +742,8 @@ def run_live(args: argparse.Namespace) -> int:
 
         signal_engine = SignalEngine(instrument=args.instrument)
         edge_manager = EdgeManager(app_config.edges)
-        sizer = AdaptivePositionSizer(initial_balance=args.initial_balance)
+        _live_balance = args.initial_balance or _raw_strat.get("prop_firm", {}).get("account_size", 10_000.0)
+        sizer = AdaptivePositionSizer(initial_balance=_live_balance)
         breaker = DailyCircuitBreaker(max_daily_loss_pct=2.0)
         exit_mgr = HybridExitManager()
         trade_mgr = TradeManager(
@@ -794,10 +798,10 @@ def main() -> int:
     args = parser.parse_args()
 
     logger.info(
-        "Starting demo challenge — mode=%s instrument=%s balance=%.0f",
+        "Starting demo challenge — mode=%s instrument=%s balance=%s",
         args.mode,
         args.instrument,
-        args.initial_balance,
+        args.initial_balance or "from config",
     )
 
     if args.mode == "backtest":
