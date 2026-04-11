@@ -504,16 +504,12 @@ class IchimokuBacktester:
                 "data_end_date": str(df_5m.index[-1]) if len(df_5m) > 0 else "",
             })
 
-        # 2.5. Pre-flight health check
-        # Pre-flight only scans Ichimoku signals. When other strategies are active,
-        # don't let a failed pre-flight halt the entire backtest.
+        # 2.5. Pre-flight health check (informational only — never halts the backtest)
         has_non_ichimoku = len(self._active_strategies) > 0 or len(self._coordinator_strategies) > 0
-        if has_non_ichimoku:
-            logger.info("Skipping Ichimoku-only pre-flight — non-Ichimoku strategies are active.")
-        else:
+        if not has_non_ichimoku:
             pre_flight_result = self.health_monitor.pre_flight(candles_1m)
             if pre_flight_result.aborted:
-                logger.error("Pre-flight ABORTED: %s", pre_flight_result.message)
+                logger.warning("Pre-flight found no signals — continuing anyway.")
 
         # 3. Main event loop over 5M bars
         for bar_idx, (ts_raw, row_5m) in enumerate(df_5m.iterrows()):
@@ -923,19 +919,13 @@ class IchimokuBacktester:
             if self.active_prop_firm_tracker is not self.prop_firm_tracker:
                 self.active_prop_firm_tracker.update(ts, balance)
 
-            # ── Checkpoint: early abort if strategy is clearly broken ──
-            _CHECKPOINT_INTERVAL = 25_000  # Check every ~25K 5M bars (~1 month)
-            _MIN_TRADES_PER_CHECKPOINT = 2  # Expect at least 2 trades per month
-            if (bar_idx > 0
-                and bar_idx % _CHECKPOINT_INTERVAL == 0
-                and bar_idx < _total_5m_bars - _CHECKPOINT_INTERVAL):
-                _cp_trades = len(closed_trades)
-                _cp_expected = (bar_idx // _CHECKPOINT_INTERVAL) * _MIN_TRADES_PER_CHECKPOINT
-                if _cp_trades < _cp_expected:
+            # ── Prop firm bust check: stop only if challenge rules are broken ──
+            if hasattr(self, 'topstep_tracker') and self.topstep_tracker is not None:
+                _tracker = self.topstep_tracker
+                if hasattr(_tracker, 'mll') and balance <= _tracker.mll:
                     logger.warning(
-                        "CHECKPOINT bar %d/%d: only %d trades (expected >= %d). "
-                        "Aborting early — strategy is not generating enough signals.",
-                        bar_idx, _total_5m_bars, _cp_trades, _cp_expected,
+                        "BUST: balance $%.2f hit trailing MLL $%.2f at bar %d — challenge failed.",
+                        balance, _tracker.mll, bar_idx,
                     )
                     break
 
