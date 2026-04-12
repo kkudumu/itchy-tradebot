@@ -14,9 +14,9 @@ instruments:
   - symbol: MNQ
     symbol_id: F.US.MNQ
     name: Micro E-mini Nasdaq
-    data_file: null
+    data_file: data/projectx_mnq_1m.parquet
 
   - symbol: MYM
     symbol_id: F.US.MYM
     name: Micro E-mini Dow
-    data_file: null
+    data_file: data/projectx_mym_1m.parquet
