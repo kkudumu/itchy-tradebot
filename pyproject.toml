@@ -56,6 +56,10 @@ include = ["src*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "integration: end-to-end tests requiring a live database and data files",
+    "slow: tests that take more than a minute to run",
+]
 
 [tool.ruff]
 line-length = 100
