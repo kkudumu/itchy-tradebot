@@ -49,6 +49,10 @@ from src.optimization.guardrails import (
 )
 from src.optimization.objectives import topstep_combine_pass_score
 from src.optimization.signal_persister import SignalPersister
+from src.optimization.llm_analysis_builder import AnalysisBuilder
+from src.optimization.llm_analyst import LLMAnalyst
+from src.optimization.config_applicator import ConfigApplicator
+from src.optimization.code_sandbox import CodeSandbox
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +164,10 @@ class AdaptiveRunner:
         self._store = ExperienceStore(db_pool)
         self._persister = SignalPersister(db_pool)
         self._epoch = 0
+        self._analysis_builder = AnalysisBuilder(db_pool=db_pool)
+        self._llm_analyst = LLMAnalyst(db_pool=db_pool)
+        self._config_applicator = ConfigApplicator()
+        self._code_sandbox = CodeSandbox()
 
         # Instrument-level status tracking
         self._status: dict[str, dict[str, Any]] = {}
@@ -169,8 +177,8 @@ class AdaptiveRunner:
     # ------------------------------------------------------------------
 
     def run_forever(self) -> None:
-        """Cycle through instruments forever."""
-        logger.info("AdaptiveRunner entering run_forever loop")
+        """Cycle through instruments forever, in parallel."""
+        logger.info("AdaptiveRunner entering run_forever loop (parallel)")
         while True:
             try:
                 self.run_once()
@@ -182,7 +190,11 @@ class AdaptiveRunner:
                 time.sleep(60)
 
     def run_once(self, instrument_filter: str | None = None) -> dict[str, Any]:
-        """Run one epoch across all (or filtered) instruments.
+        """Run one epoch across all (or filtered) instruments in parallel.
+
+        Each instrument gets its own thread. Proven instruments run with
+        fewer trials (re-validation) while unproven ones get the full
+        trial budget.
 
         Parameters
         ----------
@@ -194,6 +206,8 @@ class AdaptiveRunner:
         -------
         dict mapping optimizer symbol to result dict.
         """
+        import concurrent.futures
+
         self._epoch += 1
         logger.info("=== Epoch %d ===", self._epoch)
 
@@ -203,18 +217,35 @@ class AdaptiveRunner:
             instruments = [i for i in instruments if i["symbol"].upper() == filt]
 
         results: dict[str, Any] = {}
-        for inst in instruments:
+
+        def _run_one(inst: dict) -> tuple[str, dict]:
             sym = inst["symbol"]
             try:
-                result = self.optimize_instrument(inst)
-                results[sym] = result
-                self._status[sym] = result
+                # Proven instruments: re-validate with fewer trials
+                proven = self._store.get_proven_config(sym)
+                if proven:
+                    logger.info("%s: already proven — re-validating with 10 trials", sym)
+                    old_trials = self._trials_per_epoch
+                    self._trials_per_epoch = 10
+                    result = self.optimize_instrument(inst)
+                    self._trials_per_epoch = old_trials
+                    result["revalidation"] = True
+                else:
+                    result = self.optimize_instrument(inst)
+                return sym, result
             except Exception:
                 tb = traceback.format_exc()
                 logger.exception("Failed to optimize %s", sym)
-                err = {"symbol": sym, "error": str(tb), "epoch": self._epoch}
-                results[sym] = err
-                self._status[sym] = err
+                return sym, {"symbol": sym, "error": str(tb), "epoch": self._epoch}
+
+        # Run all instruments in parallel threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(instruments)) as executor:
+            futures = {executor.submit(_run_one, inst): inst for inst in instruments}
+            for future in concurrent.futures.as_completed(futures):
+                sym, result = future.result()
+                results[sym] = result
+                self._status[sym] = result
+                logger.info("Epoch %d — %s: %s", self._epoch, sym, result.get("status", "unknown"))
 
         logger.info("Epoch %d complete — %d instruments processed", self._epoch, len(results))
         return results
@@ -451,6 +482,32 @@ class AdaptiveRunner:
                 )
             else:
                 logger.info("No valid backtest results for %s", sym)
+
+        # LLM Meta-Optimizer: analyze results and suggest improvements
+        try:
+            prompt, prompt_path = self._analysis_builder.build_prompt(
+                instrument=sym, epoch=self._epoch, data_file=instrument.get("data_file"),
+            )
+            analysis = self._llm_analyst.analyze(sym, self._epoch, prompt)
+
+            if analysis.config_changes:
+                applied = self._config_applicator.apply(analysis.config_changes)
+                logger.info("LLM config changes applied: %s", applied)
+
+            if analysis.code_patches:
+                best_return = best_result.get("total_return_pct", 0) if best_result else 0
+                improved = self._code_sandbox.test_patches(
+                    instrument=sym, epoch=self._epoch,
+                    patches=analysis.code_patches,
+                    backtest_fn=self._backtest_fn,
+                    data=data, config=base_config,
+                    baseline_return=best_return,
+                )
+                if improved:
+                    logger.info("LLM code patch MERGED for %s", sym)
+
+        except Exception as exc:
+            logger.warning("LLM meta-optimizer failed for %s: %s", sym, exc)
 
         return status_dict
 
