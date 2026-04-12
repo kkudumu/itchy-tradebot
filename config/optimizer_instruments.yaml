@@ -1,0 +1,22 @@
+# Instruments for the adaptive optimization loop.
+# Adding a new instrument = one entry here.
+instruments:
+  - symbol: MGC
+    symbol_id: F.US.MGC
+    name: Micro Gold
+    data_file: data/projectx_mgc_1m_last30d_20260310_20260409.parquet
+
+  - symbol: MCL
+    symbol_id: F.US.MCLE
+    name: Micro Crude Oil
+    data_file: data/projectx_mcl_1m_20260101_20260411.parquet
+
+  - symbol: MNQ
+    symbol_id: F.US.MNQ
+    name: Micro E-mini Nasdaq
+    data_file: null
+
+  - symbol: MYM
+    symbol_id: F.US.MYM
+    name: Micro E-mini Dow
+    data_file: null

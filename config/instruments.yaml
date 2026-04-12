@@ -31,3 +31,72 @@ instruments:
     atr_stop_multiplier: 1.5
     # USD value of 1 point per standard lot (gold: $1/pt for 100 oz contract)
     pip_value_usd: 1.0
+
+  - symbol: "MNQ"
+    # Micro E-mini Nasdaq-100 Futures
+    class: futures
+    provider: "projectx"
+    default_quantity: 1
+    # Contract identifiers
+    contract_id: "CON.F.US.MNQ.M26"
+    symbol_id: "F.US.MNQ"
+    # MNQ tick/contract metadata
+    tick_size: 0.25            # 0.25 index points
+    tick_value_usd: 0.50      # $0.50 per tick
+    contract_size: 2           # $2 per index point
+    commission_per_contract_round_trip: 1.04
+    # TopstepX session window + daily reset (5pm CT)
+    session_open_ct: "17:00"
+    session_close_ct: "16:00"
+    daily_reset_hour_ct: 17
+    tick_value: 0.5
+    adx_threshold: 25
+    spread_max_points: 10
+    atr_stop_multiplier: 2.0
+    pip_value_usd: 0.5
+
+  - symbol: "MYM"
+    # Micro E-mini Dow Jones Futures
+    class: futures
+    provider: "projectx"
+    default_quantity: 1
+    # Contract identifiers
+    contract_id: "CON.F.US.MYM.M26"
+    symbol_id: "F.US.MYM"
+    # MYM tick/contract metadata
+    tick_size: 1.0             # 1.0 index point
+    tick_value_usd: 0.50      # $0.50 per tick
+    contract_size: 0.50        # $0.50 per index point
+    commission_per_contract_round_trip: 1.04
+    # TopstepX session window + daily reset (5pm CT)
+    session_open_ct: "17:00"
+    session_close_ct: "16:00"
+    daily_reset_hour_ct: 17
+    tick_value: 0.5
+    adx_threshold: 25
+    spread_max_points: 20
+    atr_stop_multiplier: 2.0
+    pip_value_usd: 0.5
+
+  - symbol: "MCLOIL"
+    # Micro WTI Crude Oil Futures (MCL)
+    class: futures
+    provider: "projectx"
+    default_quantity: 1
+    # Contract identifiers
+    contract_id: "CON.F.US.MCLE.K26"
+    symbol_id: "F.US.MCLE"
+    # MCL tick/contract metadata
+    tick_size: 0.01            # $0.01 per barrel
+    tick_value_usd: 1.00       # $1.00 per tick (100 barrels × $0.01)
+    contract_size: 100         # MCL = 100 barrels
+    commission_per_contract_round_trip: 1.04
+    # TopstepX session window + daily reset (5pm CT)
+    session_open_ct: "17:00"
+    session_close_ct: "16:00"
+    daily_reset_hour_ct: 17
+    tick_value: 1.0
+    adx_threshold: 25
+    spread_max_points: 10
+    atr_stop_multiplier: 2.0
+    pip_value_usd: 1.0
