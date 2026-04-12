@@ -43,6 +43,8 @@ _INSERT_COLUMNS = (
     "exit_reason",
     "pnl_usd",
     "market_snapshot",
+    "trade_type",
+    "reasoning_summary",
 )
 
 _INSERT_SQL = f"""
@@ -111,6 +113,8 @@ def _extract_row(run_id: uuid.UUID, event: dict[str, Any]) -> tuple:
         event.get("exit_reason"),                      # exit_reason
         _to_float(event.get("pnl_usd")),              # pnl_usd
         market_snapshot,                               # market_snapshot
+        event.get("trade_type", ""),               # trade_type
+        event.get("reasoning_summary", ""),         # reasoning_summary
     )
 
 
