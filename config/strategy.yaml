@@ -88,7 +88,7 @@ strategies:
       kijun_buffer_pips: 5
       max_stop_pips: 300
       min_rr_ratio: 1.5
-    rr_ratio: 2.5
+    rr_ratio: 1.5
     weight: 1.5
   sss:
     enabled: true
@@ -112,8 +112,8 @@ strategies:
     min_stop_pips: 10.0
     rr_ratio: 2.0
 risk:
-  initial_risk_pct: 0.3
-  reduced_risk_pct: 0.5
+  initial_risk_pct: 0.5
+  reduced_risk_pct: 0.3
   phase_threshold_pct: 4.0
   daily_circuit_breaker_pct: 4.5
   max_concurrent_positions: 3

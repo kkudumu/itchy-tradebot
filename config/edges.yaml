@@ -44,7 +44,7 @@ trend_direction:
   params:
     require_both_tf: false
     tolerance_pct: 0.3
-    htf_lookback: 50
+    htf_lookback: 30
 time_stop:
   enabled: false
   params:
