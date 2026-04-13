@@ -88,6 +88,8 @@ strategies:
       kijun_buffer_pips: 5
       max_stop_pips: 300
       min_rr_ratio: 1.5
+    rr_ratio: 2.5
+    weight: 1.5
   sss:
     enabled: true
     weight: 1.0
