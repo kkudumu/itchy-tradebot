@@ -12,6 +12,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# Backtest screenshots are rendered from worker threads; force a headless
+# backend before any matplotlib import chain is triggered.
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",

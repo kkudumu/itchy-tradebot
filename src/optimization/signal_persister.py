@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from typing import Any
 
@@ -87,12 +88,25 @@ def _extract_row(run_id: uuid.UUID, event: dict[str, Any]) -> tuple:
 
     # Build market_snapshot JSONB from context fields.
     market_snapshot = json.dumps(
-        {
-            "atr": event.get("atr"),
-            "adx": event.get("adx"),
-            "session": event.get("session"),
-            "regime": event.get("regime"),
-        },
+        _clean_json_value(
+            {
+                "atr": event.get("atr"),
+                "adx": event.get("adx"),
+                "session": event.get("session"),
+                "regime": event.get("regime"),
+                "event_type": event.get("event_type"),
+                "quality_tier": event.get("quality_tier"),
+                "screenshot_path": event.get("screenshot_path"),
+                "entry_screenshot_path": event.get("entry_screenshot_path"),
+                "exit_screenshot_path": event.get("exit_screenshot_path"),
+                "zone_context": event.get("zone_context"),
+                "wave_targets": event.get("wave_targets"),
+                "elliott_position": event.get("elliott_position"),
+                "cloud_balance_state": event.get("cloud_balance_state"),
+                "kihon_suchi_state": event.get("kihon_suchi_state"),
+                "extra": event.get("extra"),
+            }
+        ),
         default=str,
     )
 
@@ -126,6 +140,17 @@ def _to_float(value: Any) -> float | None:
 def _to_int(value: Any) -> int | None:
     """Cast to int, preserving None."""
     return int(value) if value is not None else None
+
+
+def _clean_json_value(value: Any) -> Any:
+    """Convert non-JSON-safe values like NaN/Inf into NULL-compatible data."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): _clean_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean_json_value(v) for v in value]
+    return value
 
 
 class SignalPersister:

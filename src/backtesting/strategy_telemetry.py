@@ -217,6 +217,9 @@ class StrategyTelemetryCollector:
         planned_size: float | None = None,
         planned_stop_pips: float | None = None,
         planned_tp_pips: float | None = None,
+        pattern_type: str | None = None,
+        confluence_score: float | None = None,
+        regime: str | None = None,
         **extra: Any,
     ) -> None:
         self.emit(
@@ -226,6 +229,9 @@ class StrategyTelemetryCollector:
                 event_type="signal_entered",
                 direction=direction,
                 price=price,
+                confluence_score=confluence_score,
+                pattern_type=pattern_type,
+                regime=regime,
                 planned_size=planned_size,
                 planned_stop_pips=planned_stop_pips,
                 planned_tp_pips=planned_tp_pips,
@@ -242,6 +248,9 @@ class StrategyTelemetryCollector:
         direction: str | None = None,
         price: float | None = None,
         realized_r: float | None = None,
+        pattern_type: str | None = None,
+        confluence_score: float | None = None,
+        regime: str | None = None,
         **extra: Any,
     ) -> None:
         self.emit(
@@ -252,6 +261,9 @@ class StrategyTelemetryCollector:
                 direction=direction,
                 price=price,
                 realized_r=realized_r,
+                confluence_score=confluence_score,
+                pattern_type=pattern_type,
+                regime=regime,
                 extra=extra,
                 **ts_to_event_fields(ts),
             )

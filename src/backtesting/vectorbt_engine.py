@@ -24,10 +24,12 @@ downstream analysis and export.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -43,6 +45,7 @@ from src.learning.embeddings import EmbeddingEngine
 from src.learning.memory_store import InMemorySimilarityStore, InMemoryStatsAnalyzer
 from src.risk.circuit_breaker import DailyCircuitBreaker
 from src.risk.exit_manager import ActiveTrade, HybridExitManager
+from src.risk.instrument_sizer import sizer_for_instrument
 from src.risk.position_sizer import AdaptivePositionSizer
 from src.risk.trade_manager import TradeManager
 from src.monitoring.health_monitor import StrategyHealthMonitor
@@ -55,6 +58,10 @@ _XAUUSD_POINT_VALUE: float = 100.0
 
 # Minimum bars of warm-up data before the first signal scan
 _WARMUP_BARS: int = 60
+
+# Keep enough room for multiple stop-outs instead of letting one trade
+# consume the entire remaining daily-loss / MLL budget.
+_TOPSTEP_MIN_LOSSES_BUFFER: float = 3.0
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -147,6 +154,9 @@ class IchimokuBacktester:
         self._config = cfg
         self._initial_balance = initial_balance
         self._point_value = point_value
+        risk_cfg = cfg.get("risk", {}) if isinstance(cfg.get("risk"), dict) else {}
+        exit_cfg = cfg.get("exit", {}) if isinstance(cfg.get("exit"), dict) else {}
+        prop_firm_cfg = cfg.get("prop_firm", {}) or {}
 
         # Trading costs — forex uses per-lot + spread points; futures
         # uses per-contract round-trip commission + tick slippage. The
@@ -186,6 +196,22 @@ class IchimokuBacktester:
             # formula yields dollars for futures:
             #   $ per price-unit per contract = tick_value_usd / tick_size
             point_value = self._tick_value_usd / self._tick_size
+            self._point_value = point_value
+
+        instrument_sizer = None
+        if self._instrument_class == "futures" and self._tick_size > 0 and self._tick_value_usd > 0:
+            instrument_for_sizer = SimpleNamespace(
+                class_=self._instrument_class,
+                tick_size=self._tick_size,
+                tick_value_usd=self._tick_value_usd,
+                max_micro_contracts=(
+                    instrument_cfg.get("max_micro_contracts")
+                    or prop_firm_cfg.get("max_micro_contracts")
+                    or cfg.get("max_micro_contracts")
+                    or 50
+                ),
+            )
+            instrument_sizer = sizer_for_instrument(instrument_for_sizer)
 
         # Strategy components
         self.signal_engine = SignalEngine(config=cfg)
@@ -194,23 +220,37 @@ class IchimokuBacktester:
         # Risk components
         sizer = AdaptivePositionSizer(
             initial_balance=initial_balance,
-            initial_risk_pct=cfg.get("initial_risk_pct", 1.5),
-            reduced_risk_pct=cfg.get("reduced_risk_pct", 0.75),
-            phase_threshold_pct=cfg.get("phase_threshold_pct", 4.0),
+            initial_risk_pct=risk_cfg.get("initial_risk_pct", cfg.get("initial_risk_pct", 1.5)),
+            reduced_risk_pct=risk_cfg.get("reduced_risk_pct", cfg.get("reduced_risk_pct", 0.75)),
+            phase_threshold_pct=risk_cfg.get("phase_threshold_pct", cfg.get("phase_threshold_pct", 4.0)),
+            max_lot=risk_cfg.get("max_lot_size", cfg.get("max_lot_size", 10.0)),
+            instrument_sizer=instrument_sizer,
         )
         breaker = DailyCircuitBreaker(
-            max_daily_loss_pct=max_daily_loss_pct,
+            max_daily_loss_pct=risk_cfg.get(
+                "daily_circuit_breaker_pct",
+                cfg.get("daily_circuit_breaker_pct", max_daily_loss_pct),
+            ),
         )
         exit_mgr = HybridExitManager(
-            tp_r_multiple=cfg.get("tp_r_multiple", 2.0),
-            kijun_trail_start_r=cfg.get("kijun_trail_start_r", 1.5),
-            higher_tf_kijun_start_r=cfg.get("higher_tf_kijun_start_r", 3.0),
+            tp_r_multiple=exit_cfg.get("tp_r_multiple", cfg.get("tp_r_multiple", 2.0)),
+            kijun_trail_start_r=exit_cfg.get(
+                "kijun_trail_start_r",
+                cfg.get("kijun_trail_start_r", 1.5),
+            ),
+            higher_tf_kijun_start_r=exit_cfg.get(
+                "higher_tf_kijun_start_r",
+                cfg.get("higher_tf_kijun_start_r", 3.0),
+            ),
         )
         self.trade_manager = TradeManager(
             position_sizer=sizer,
             circuit_breaker=breaker,
             exit_manager=exit_mgr,
-            max_concurrent=cfg.get("max_concurrent_positions", 3),
+            max_concurrent=risk_cfg.get(
+                "max_concurrent_positions",
+                cfg.get("max_concurrent_positions", 3),
+            ),
         )
 
         # Learning + logging components
@@ -247,7 +287,6 @@ class IchimokuBacktester:
             time_limit_days=prop_firm_time_limit_days,
         )
 
-        prop_firm_cfg = cfg.get("prop_firm", {}) or {}
         prop_firm_style = prop_firm_cfg.get("style", "the5ers_pct_phased")
         self._prop_firm_style = prop_firm_style
 
@@ -366,6 +405,14 @@ class IchimokuBacktester:
         self.telemetry = StrategyTelemetryCollector(
             run_id=cfg.get("run_id", "backtest")
         )
+        self._mega_agent = None
+        self._mega_arbitrator = None
+        self._mega_context_builder = None
+        self._mega_shadow_recorder = None
+        self._mega_trade_memory = None
+        self._mega_perf_buckets = None
+        self._mega_config = cfg.get("mega_vision", {}) or {}
+        self._init_mega_vision()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -588,7 +635,17 @@ class IchimokuBacktester:
                                 confluence_score=float(
                                     getattr(_sig, "confluence_score", 0) or 0
                                 ),
-                                pattern_type=getattr(_sig, "pattern_type", None),
+                                pattern_type=getattr(_sig, "trade_type", None),
+                                planned_stop_pips=getattr(_sig, "stop_loss", None),
+                                planned_tp_pips=getattr(_sig, "take_profit", None),
+                                trade_type=getattr(_sig, "trade_type", ""),
+                                quality_tier=getattr(_sig, "quality_tier", ""),
+                                reasoning_summary=str(getattr(_sig, "trade_type", "") or ""),
+                                zone_context=getattr(_sig, "zone_context", {}),
+                                wave_targets=getattr(_sig, "wave_targets", {}),
+                                elliott_position=getattr(_sig, "elliott_position", {}),
+                                cloud_balance_state=getattr(_sig, "cloud_balance_state", {}),
+                                kihon_suchi_state=getattr(_sig, "kihon_suchi_state", {}),
                             )
                         except Exception:
                             pass
@@ -628,7 +685,23 @@ class IchimokuBacktester:
                                 confluence_score=float(
                                     getattr(_csig, "confluence_score", 0) or 0
                                 ),
-                                pattern_type=_csig.reasoning.get("trade_type"),
+                                pattern_type=getattr(_csig, "trade_type", None)
+                                or _csig.reasoning.get("trade_type"),
+                                planned_stop_pips=getattr(_csig, "stop_loss", None),
+                                planned_tp_pips=getattr(_csig, "take_profit", None),
+                                trade_type=getattr(_csig, "trade_type", "")
+                                or _csig.reasoning.get("trade_type", ""),
+                                quality_tier=getattr(_csig, "quality_tier", ""),
+                                reasoning_summary=str(
+                                    _csig.reasoning.get("trade_type")
+                                    or getattr(_csig, "trade_type", "")
+                                    or ""
+                                ),
+                                zone_context=getattr(_csig, "zone_context", {}),
+                                wave_targets=getattr(_csig, "wave_targets", {}),
+                                elliott_position=getattr(_csig, "elliott_position", {}),
+                                cloud_balance_state=getattr(_csig, "cloud_balance_state", {}),
+                                kihon_suchi_state=getattr(_csig, "kihon_suchi_state", {}),
                             )
                         except Exception:
                             pass
@@ -683,11 +756,40 @@ class IchimokuBacktester:
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
                     self._record_learning(trade_summary, _tctx, enable_learning)
+                    self._record_mega_trade(trade_summary, _tctx)
                     self.health_monitor.on_trade_closed(won=_r > 0)
                     if live_dashboard is not None:
                         self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                    exit_screenshot_path = ""
                     if _screenshot_fn:
-                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                        exit_screenshot_path = _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    trade_summary["entry_screenshot_path"] = _tstate.get("entry_screenshot_path")
+                    trade_summary["exit_screenshot_path"] = exit_screenshot_path or None
+                    try:
+                        self.telemetry.emit_trade_exited(
+                            ts,
+                            trade_summary.get("strategy_name", _tsig.strategy_name if _tsig else "ichimoku"),
+                            direction=trade_summary.get("direction"),
+                            price=trade_summary.get("exit_price"),
+                            realized_r=trade_summary.get("r_multiple"),
+                            pattern_type=trade_summary.get("trade_type"),
+                            confluence_score=trade_summary.get("confluence_score"),
+                            trade_type=trade_summary.get("trade_type", ""),
+                            quality_tier=trade_summary.get("signal_tier", ""),
+                            reasoning_summary=trade_summary.get("entry_reason", ""),
+                            exit_reason=trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+                            pnl_usd=trade_summary.get("pnl_usd", trade_summary.get("pnl")),
+                            screenshot_path=exit_screenshot_path or None,
+                            entry_screenshot_path=_tstate.get("entry_screenshot_path"),
+                            exit_screenshot_path=exit_screenshot_path or None,
+                            zone_context=trade_summary.get("zone_context"),
+                            wave_targets=trade_summary.get("wave_targets"),
+                            elliott_position=trade_summary.get("elliott_position"),
+                            cloud_balance_state=trade_summary.get("cloud_balance_state"),
+                            kihon_suchi_state=trade_summary.get("kihon_suchi_state"),
+                        )
+                    except Exception:
+                        pass
                     _closed_this_bar.append(_tid)
                     continue
 
@@ -713,11 +815,40 @@ class IchimokuBacktester:
                     else: _n_losses += 1
                     balance = self._update_balance_from_trade(balance, trade_summary)
                     self._record_learning(trade_summary, _tctx, enable_learning)
+                    self._record_mega_trade(trade_summary, _tctx)
                     self.health_monitor.on_trade_closed(won=_r > 0)
                     if live_dashboard is not None:
                         self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                    exit_screenshot_path = ""
                     if _screenshot_fn:
-                        _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                        exit_screenshot_path = _screenshot_fn(df_5m, bar_idx, "exit", _tid)
+                    trade_summary["entry_screenshot_path"] = _tstate.get("entry_screenshot_path")
+                    trade_summary["exit_screenshot_path"] = exit_screenshot_path or None
+                    try:
+                        self.telemetry.emit_trade_exited(
+                            ts,
+                            trade_summary.get("strategy_name", _tsig.strategy_name if _tsig else "ichimoku"),
+                            direction=trade_summary.get("direction"),
+                            price=trade_summary.get("exit_price"),
+                            realized_r=trade_summary.get("r_multiple"),
+                            pattern_type=trade_summary.get("trade_type"),
+                            confluence_score=trade_summary.get("confluence_score"),
+                            trade_type=trade_summary.get("trade_type", ""),
+                            quality_tier=trade_summary.get("signal_tier", ""),
+                            reasoning_summary=trade_summary.get("entry_reason", ""),
+                            exit_reason=trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+                            pnl_usd=trade_summary.get("pnl_usd", trade_summary.get("pnl")),
+                            screenshot_path=exit_screenshot_path or None,
+                            entry_screenshot_path=_tstate.get("entry_screenshot_path"),
+                            exit_screenshot_path=exit_screenshot_path or None,
+                            zone_context=trade_summary.get("zone_context"),
+                            wave_targets=trade_summary.get("wave_targets"),
+                            elliott_position=trade_summary.get("elliott_position"),
+                            cloud_balance_state=trade_summary.get("cloud_balance_state"),
+                            kihon_suchi_state=trade_summary.get("kihon_suchi_state"),
+                        )
+                    except Exception:
+                        pass
                     _closed_this_bar.append(_tid)
 
                 elif decision.action == "partial_exit":
@@ -785,6 +916,16 @@ class IchimokuBacktester:
                             all_signals.append(ichi_signal)
                             _pipeline_counts["signals_generated"] += 1
 
+                    all_signals = self._maybe_apply_mega_vision(
+                        ts=ts,
+                        candidate_signals=all_signals,
+                        df_5m=df_5m,
+                        bar_idx=bar_idx,
+                        row_5m=row_5m,
+                        htf_vals=htf_vals,
+                        balance=balance,
+                    )
+
                     # Pick best signal
                     signal = self._signal_blender.select(all_signals) if all_signals else None
 
@@ -804,7 +945,7 @@ class IchimokuBacktester:
                         )
                         edge_ctx_entry.signal = signal
 
-                        entry_allowed, entry_results = self.edge_manager.check_entry(edge_ctx_entry)
+                        entry_allowed, entry_results = self._check_entry_edges(edge_ctx_entry)
 
                         if not entry_allowed:
                             skipped_signals += 1
@@ -843,6 +984,18 @@ class IchimokuBacktester:
                                 # Position size modifier from modifier edges
                                 size_multiplier = self.edge_manager.get_combined_size_multiplier(edge_ctx_entry)
                                 size_multiplier *= learning_size_mult
+                                sizing_equity = self._cap_sizing_equity_for_open(
+                                    current_balance=balance,
+                                    desired_sizing_equity=balance * size_multiplier,
+                                )
+
+                                if sizing_equity <= 0:
+                                    skipped_signals += 1
+                                    _pipeline_counts["signals_filtered_open_rejected"] += 1
+                                    logger.debug(
+                                        "Trade open rejected: no remaining combine-safe risk budget"
+                                    )
+                                    continue
 
                                 # Open the trade
                                 try:
@@ -854,7 +1007,7 @@ class IchimokuBacktester:
                                         direction=signal.direction,
                                         atr=signal.atr,
                                         point_value=self._point_value,
-                                        account_equity=balance * size_multiplier,
+                                        account_equity=sizing_equity,
                                         atr_multiplier=atr_multiplier,
                                         instrument=instrument,
                                         entry_time=ts,
@@ -873,6 +1026,7 @@ class IchimokuBacktester:
                                         ),
                                         "candles": 0,
                                         "strategy": _strat_name,
+                                        "entry_screenshot_path": None,
                                     }
                                     # Sync legacy aliases
                                     active_trade_id = trade_id
@@ -881,6 +1035,17 @@ class IchimokuBacktester:
                                     active_context = active_trades[trade_id]["context"]
                                     candles_since_entry = 0
                                     _pipeline_counts["signals_entered"] += 1
+
+                                    # Entry screenshot
+                                    entry_screenshot_path = ""
+                                    if _screenshot_fn:
+                                        entry_screenshot_path = _screenshot_fn(
+                                            df_5m, bar_idx, "entry", trade_id
+                                        )
+                                        active_trades[trade_id]["entry_screenshot_path"] = (
+                                            entry_screenshot_path
+                                        )
+
                                     # Telemetry: emit entered event
                                     try:
                                         self.telemetry.emit_entry(
@@ -889,13 +1054,32 @@ class IchimokuBacktester:
                                             direction=signal.direction,
                                             price=float(signal.entry_price),
                                             planned_size=float(pos_size.lot_size),
+                                            planned_stop_pips=float(signal.stop_loss),
+                                            planned_tp_pips=float(signal.take_profit),
+                                            pattern_type=getattr(signal, "trade_type", None),
+                                            confluence_score=float(
+                                                getattr(signal, "confluence_score", 0) or 0
+                                            ),
+                                            trade_type=getattr(signal, "trade_type", ""),
+                                            quality_tier=getattr(signal, "quality_tier", ""),
+                                            reasoning_summary=str(
+                                                (signal.reasoning or {}).get("trade_type")
+                                                or getattr(signal, "trade_type", "")
+                                                or ""
+                                            ),
+                                            zone_context=getattr(signal, "zone_context", {}),
+                                            wave_targets=getattr(signal, "wave_targets", {}),
+                                            elliott_position=getattr(signal, "elliott_position", {}),
+                                            cloud_balance_state=getattr(
+                                                signal, "cloud_balance_state", {}
+                                            ),
+                                            kihon_suchi_state=getattr(
+                                                signal, "kihon_suchi_state", {}
+                                            ),
+                                            screenshot_path=entry_screenshot_path or None,
                                         )
                                     except Exception:
                                         pass
-
-                                    # Entry screenshot
-                                    if _screenshot_fn:
-                                        _screenshot_fn(df_5m, bar_idx, "entry", trade_id)
 
                                     logger.debug(
                                         "Trade opened: %s %s @ %.2f SL=%.2f TP=%.2f "
@@ -950,9 +1134,27 @@ class IchimokuBacktester:
                 else: _n_losses += 1
                 balance = self._update_balance_from_trade(balance, trade_summary)
                 self._record_learning(trade_summary, active_context, enable_learning)
+                self._record_mega_trade(trade_summary, active_context)
                 self.health_monitor.on_trade_closed(won=_r > 0)
                 if live_dashboard is not None:
                     self._push_trade_to_dashboard(live_dashboard, trade_summary, ts, len(closed_trades))
+                try:
+                    self.telemetry.emit_trade_exited(
+                        ts,
+                        trade_summary.get("strategy_name", getattr(active_signal, "strategy_name", "ichimoku")),
+                        direction=trade_summary.get("direction"),
+                        price=trade_summary.get("exit_price"),
+                        realized_r=trade_summary.get("r_multiple"),
+                        pattern_type=trade_summary.get("trade_type"),
+                        confluence_score=trade_summary.get("confluence_score"),
+                        trade_type=trade_summary.get("trade_type", ""),
+                        quality_tier=trade_summary.get("signal_tier", ""),
+                        reasoning_summary=trade_summary.get("entry_reason", ""),
+                        exit_reason=trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+                        pnl_usd=trade_summary.get("pnl_usd", trade_summary.get("pnl")),
+                    )
+                except Exception:
+                    pass
                 logger.warning("HALTED: force-closed trade %s at bar %d", active_trade_id, bar_idx)
                 active_trade_id = None
                 active_trade = None
@@ -1130,9 +1332,31 @@ class IchimokuBacktester:
                 else: _n_losses += 1
                 balance = self._update_balance_from_trade(balance, trade_summary)
                 self._record_learning(trade_summary, _tstate["context"], enable_learning)
+                self._record_mega_trade(trade_summary, _tstate["context"])
                 self.health_monitor.on_trade_closed(won=_r > 0)
                 if live_dashboard is not None:
                     self._push_trade_to_dashboard(live_dashboard, trade_summary, final_ts, len(closed_trades))
+                try:
+                    self.telemetry.emit_trade_exited(
+                        final_ts,
+                        trade_summary.get(
+                            "strategy_name",
+                            getattr(_tstate.get("signal"), "strategy_name", "ichimoku"),
+                        ),
+                        direction=trade_summary.get("direction"),
+                        price=trade_summary.get("exit_price"),
+                        realized_r=trade_summary.get("r_multiple"),
+                        pattern_type=trade_summary.get("trade_type"),
+                        confluence_score=trade_summary.get("confluence_score"),
+                        trade_type=trade_summary.get("trade_type", ""),
+                        quality_tier=trade_summary.get("signal_tier", ""),
+                        reasoning_summary=trade_summary.get("entry_reason", ""),
+                        exit_reason=trade_summary.get("exit_reason", trade_summary.get("reason", "")),
+                        pnl_usd=trade_summary.get("pnl_usd", trade_summary.get("pnl")),
+                        entry_screenshot_path=_tstate.get("entry_screenshot_path"),
+                    )
+                except Exception:
+                    pass
             active_trades.clear()
 
         # Signal live dashboard completion
@@ -1270,6 +1494,23 @@ class IchimokuBacktester:
         except Exception as exc:
             logger.warning("Telemetry flush failed: %s", exc)
 
+        try:
+            mega_dir = Path(
+                self._config.get("telemetry_output_dir")
+                or f"reports/{self.telemetry.run_id}"
+            )
+            if self._mega_shadow_recorder is not None:
+                self._mega_shadow_recorder.flush_to_parquet(
+                    mega_dir / "mega_vision_shadow.parquet"
+                )
+            if self._mega_trade_memory is not None:
+                self._mega_trade_memory.snapshot_to_parquet(
+                    mega_dir / "mega_vision_trade_memory.parquet"
+                )
+                self._mega_trade_memory.close()
+        except Exception as exc:
+            logger.warning("Mega Vision artifact flush failed: %s", exc)
+
         return BacktestResult(
             trades=closed_trades,
             metrics=metrics,
@@ -1390,6 +1631,22 @@ class IchimokuBacktester:
         if active_trade is not None:
             current_r = active_trade.current_r
 
+        # HTF trend direction: compare close to kijun (26-period midpoint)
+        # on 1H and 4H. Kijun acts as a trend baseline — price above = bullish.
+        htf_trend_1h = self._classify_htf_trend(
+            htf_vals.get("close_1h"), htf_vals.get("kijun_1h"), htf_vals.get("atr_1h"),
+        )
+        htf_trend_4h = self._classify_htf_trend(
+            htf_vals.get("close_4h"), htf_vals.get("kijun_4h"), htf_vals.get("atr_4h"),
+        )
+
+        indicator_values = {
+            'kijun': kijun_5m,
+            'cloud_thickness': cloud_thickness,
+            'htf_trend_1h': htf_trend_1h,
+            'htf_trend_4h': htf_trend_4h,
+        }
+
         return EdgeContext(
             timestamp=ts,
             day_of_week=ts.weekday(),
@@ -1400,13 +1657,45 @@ class IchimokuBacktester:
             session=_session_from_hour(ts.hour),
             adx=_nan_to_zero(float(row_5m.get("adx") or htf_vals.get("adx_15m") or 0.0)),
             atr=atr,
-            indicator_values={'kijun': kijun_5m, 'cloud_thickness': cloud_thickness},
+            indicator_values=indicator_values,
             bb_squeeze=False,  # BB squeeze not computed at engine level
             confluence_score=confluence_score,
             current_r=current_r,
             candles_since_entry=candles_since_entry,
             equity_curve=list(equity_by_r),
         )
+
+    @staticmethod
+    def _classify_htf_trend(
+        close: object, kijun: object, atr: object,
+    ) -> str | None:
+        """Classify a higher-timeframe trend as bullish/bearish/neutral.
+
+        Compares the HTF close to the HTF Kijun (26-period midpoint).
+        A deadband of 0.5 × ATR around the Kijun prevents whipsaws in
+        flat markets. Returns None when data is unavailable.
+        """
+        if close is None or kijun is None:
+            return None
+        try:
+            c = float(close)
+            k = float(kijun)
+        except (TypeError, ValueError):
+            return None
+        if np.isnan(c) or np.isnan(k):
+            return None
+        # Deadband: 0.5 × ATR around kijun
+        deadband = 0.0
+        if atr is not None:
+            try:
+                deadband = float(atr) * 0.5
+            except (TypeError, ValueError):
+                pass
+        if c > k + deadband:
+            return "bullish"
+        elif c < k - deadband:
+            return "bearish"
+        return "neutral"
 
     # ------------------------------------------------------------------
     # Entry context for embedding
@@ -1451,6 +1740,293 @@ class IchimokuBacktester:
             # Kijun distance
             "kijun_distance_5m":  signal.entry_price - (mtf.kijun_5m if mtf else signal.entry_price),
         }
+
+    def _cap_sizing_equity_for_open(
+        self,
+        *,
+        current_balance: float,
+        desired_sizing_equity: float,
+    ) -> float:
+        """Reduce planned risk when combine headroom is tighter than requested."""
+        if desired_sizing_equity <= 0:
+            return 0.0
+
+        risk_pct = float(self.trade_manager._sizer.get_risk_pct() or 0.0)
+        if risk_pct <= 0:
+            return desired_sizing_equity
+
+        desired_risk_usd = desired_sizing_equity * (risk_pct / 100.0)
+        budget_caps: list[float] = []
+
+        breaker = getattr(self.trade_manager, "_breaker", None)
+        if breaker is not None:
+            remaining_daily = float(breaker.remaining_risk_budget(current_balance))
+            if remaining_daily > 0:
+                budget_caps.append(remaining_daily / _TOPSTEP_MIN_LOSSES_BUFFER)
+
+        tracker = getattr(self, "topstep_tracker", None)
+        if tracker is not None and hasattr(tracker, "to_dict"):
+            try:
+                tracker_state = tracker.to_dict()
+                distance_to_mll = float(tracker_state.get("distance_to_mll") or 0.0)
+            except Exception:
+                distance_to_mll = 0.0
+            if distance_to_mll > 0:
+                budget_caps.append(distance_to_mll / _TOPSTEP_MIN_LOSSES_BUFFER)
+
+        if not budget_caps:
+            return desired_sizing_equity
+
+        max_risk_usd = min(desired_risk_usd, *budget_caps)
+        if max_risk_usd <= 0:
+            return 0.0
+        return min(desired_sizing_equity, max_risk_usd * 100.0 / risk_pct)
+
+    def _check_entry_edges(self, context: EdgeContext) -> tuple[bool, list[Any]]:
+        """Run entry filters plus the Friday close cutoff as an entry guard."""
+        entry_allowed, entry_results = self.edge_manager.check_entry(context)
+        if not entry_allowed:
+            return entry_allowed, entry_results
+
+        try:
+            friday_edge = self.edge_manager.get_edge("friday_close")
+        except KeyError:
+            return entry_allowed, entry_results
+
+        if getattr(friday_edge, "enabled", False):
+            friday_result = friday_edge.should_allow(context)
+            if not friday_result.allowed:
+                entry_results.append(friday_result)
+                return False, entry_results
+
+        return entry_allowed, entry_results
+
+    def _init_mega_vision(self) -> None:
+        """Wire optional Mega Vision shadow/authority components."""
+        cfg = self._mega_config if isinstance(self._mega_config, dict) else {}
+        if not cfg:
+            return
+
+        try:
+            from src.mega_vision.agent import MegaStrategyAgent, MegaVisionConfig
+            from src.mega_vision.arbitration import Arbitrator
+            from src.mega_vision.context_builder import ContextBuilder
+            from src.mega_vision.performance_buckets import PerformanceBuckets
+            from src.mega_vision.shadow_recorder import ShadowRecorder
+            from src.mega_vision.trade_memory import TradeMemory
+
+            mv_cfg = MegaVisionConfig.from_dict(cfg)
+            if mv_cfg.mode == "disabled":
+                return
+
+            output_dir = Path(
+                self._config.get("telemetry_output_dir")
+                or f"reports/{self.telemetry.run_id}"
+            )
+            trade_memory = TradeMemory(output_dir / "mega_vision_trade_memory.db")
+            perf_buckets = PerformanceBuckets(trade_memory=trade_memory, cache_ttl_seconds=0.0)
+            context_builder = ContextBuilder(
+                telemetry_collector=self.telemetry,
+                trade_memory=trade_memory,
+                performance_buckets=perf_buckets,
+            )
+            ctx = SimpleNamespace(
+                context_builder=context_builder,
+                telemetry_collector=self.telemetry,
+                trade_memory=trade_memory,
+                performance_buckets=perf_buckets,
+                regime_detector=None,
+                screenshot_provider=None,
+                current_ts=None,
+                current_candles=None,
+                last_pick=None,
+            )
+            active_names = list(self._config.get("active_strategies", []))
+            if "ichimoku" not in active_names:
+                active_names.append("ichimoku")
+            self._mega_agent = MegaStrategyAgent(
+                config=mv_cfg,
+                ctx=ctx,
+                prop_firm_tracker=self.active_prop_firm_tracker,
+                instrument_sizer=getattr(self.trade_manager._sizer, "_instrument_sizer", None),
+                telemetry_collector=self.telemetry,
+                active_strategies=active_names,
+            )
+            self._mega_arbitrator = Arbitrator(mode=mv_cfg.mode, telemetry=self.telemetry)
+            self._mega_context_builder = context_builder
+            self._mega_shadow_recorder = ShadowRecorder(run_id=self.telemetry.run_id, out_dir=output_dir)
+            self._mega_trade_memory = trade_memory
+            self._mega_perf_buckets = perf_buckets
+        except Exception as exc:
+            logger.warning("Mega Vision init failed; continuing without it: %s", exc)
+            self._mega_agent = None
+            self._mega_arbitrator = None
+            self._mega_context_builder = None
+            self._mega_shadow_recorder = None
+            self._mega_trade_memory = None
+            self._mega_perf_buckets = None
+
+    def _build_mega_context_state(
+        self,
+        *,
+        df_5m: pd.DataFrame,
+        bar_idx: int,
+        ts: datetime,
+        row_5m: Any,
+        htf_vals: dict,
+        balance: float,
+    ) -> dict[str, Any]:
+        recent_start = max(0, bar_idx - 59)
+        recent_bars = df_5m.iloc[recent_start : bar_idx + 1].copy()
+        prop_firm_state = {}
+        tracker = getattr(self, "active_prop_firm_tracker", None)
+        if tracker is not None:
+            try:
+                if hasattr(tracker, "to_dict"):
+                    prop_firm_state = tracker.to_dict()
+                elif hasattr(tracker, "check_pass"):
+                    prop_firm_state = tracker.check_pass()
+            except Exception:
+                prop_firm_state = {}
+
+        return {
+            "recent_bars": recent_bars,
+            "current_indicators": {
+                "close": _safe_float(row_5m.get("close")),
+                "adx_5m": _safe_float(row_5m.get("adx")),
+                "atr_5m": _safe_float(row_5m.get("atr")),
+                "kijun_5m": _safe_float(row_5m.get("kijun")),
+                "kijun_15m": _safe_float(htf_vals.get("kijun_15m")),
+                "kijun_1h": _safe_float(htf_vals.get("kijun_1h")),
+                "cloud_thickness_4h": _safe_float(htf_vals.get("cloud_thickness_4h")),
+            },
+            "prop_firm_state": prop_firm_state,
+            "risk_state": {
+                "balance": float(balance),
+                "open_trades": len(self.trade_manager.active_trade_ids),
+                "phase": self.trade_manager._sizer.get_phase(),
+                "risk_pct": self.trade_manager._sizer.get_risk_pct(),
+                "daily_loss_pct": self.trade_manager._breaker.daily_loss_pct(balance),
+            },
+        }
+
+    def _maybe_apply_mega_vision(
+        self,
+        *,
+        ts: datetime,
+        candidate_signals: list[Signal],
+        df_5m: pd.DataFrame,
+        bar_idx: int,
+        row_5m: Any,
+        htf_vals: dict,
+        balance: float,
+    ) -> list[Signal]:
+        if not candidate_signals or self._mega_agent is None or self._mega_arbitrator is None:
+            return list(candidate_signals)
+
+        cfg = getattr(self._mega_agent, "config", None)
+        cadence = getattr(cfg, "decision_cadence", "per_signal")
+        per_n_bars = int(getattr(cfg, "per_n_bars", 5) or 5)
+        if cadence == "per_n_bars" and bar_idx % max(1, per_n_bars) != 0:
+            return list(candidate_signals)
+
+        context_state = self._build_mega_context_state(
+            df_5m=df_5m,
+            bar_idx=bar_idx,
+            ts=ts,
+            row_5m=row_5m,
+            htf_vals=htf_vals,
+            balance=balance,
+        )
+        if self._mega_context_builder is not None:
+            try:
+                self._mega_context_builder.build(ts, candidate_signals, context_state)
+            except Exception:
+                pass
+
+        start = datetime.now(timezone.utc)
+        try:
+            agent_pick = asyncio.run(
+                self._mega_agent.decide(ts=ts, candidate_signals=list(candidate_signals))
+            )
+        except Exception as exc:
+            logger.debug("Mega Vision decision failed: %s", exc)
+            agent_pick = {
+                "strategy_picks": [getattr(s, "strategy_name", None) for s in candidate_signals],
+                "confidence": 0.0,
+                "reasoning": f"agent_error:{type(exc).__name__}",
+                "fallback": True,
+            }
+        latency_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000.0
+        native_signals = self._mega_arbitrator.arbitrate(agent_pick, list(candidate_signals))
+
+        if self._mega_shadow_recorder is not None:
+            try:
+                cost_usd = None
+                if (
+                    hasattr(self._mega_agent, "cost_tracker")
+                    and not self._mega_agent.cost_tracker.subscription_mode
+                ):
+                    cost_usd = float(self._mega_agent.cost_tracker.total_cost_usd)
+                self._mega_shadow_recorder.record(
+                    ts=ts,
+                    candidate_signals=list(candidate_signals),
+                    agent_pick=agent_pick,
+                    native_picks=native_signals,
+                    latency_ms=latency_ms,
+                    cost_usd=cost_usd,
+                )
+            except Exception:
+                pass
+
+        return native_signals
+
+    def _record_mega_trade(self, trade_summary: dict, context: Optional[dict]) -> None:
+        if self._mega_trade_memory is None:
+            return
+        try:
+            opened_at = trade_summary.get("entry_time")
+            closed_at = trade_summary.get("exit_time")
+            duration_minutes = None
+            if hasattr(opened_at, "timestamp") and hasattr(closed_at, "timestamp"):
+                duration_minutes = (closed_at - opened_at).total_seconds() / 60.0
+            extra = {
+                "reason": trade_summary.get("reason"),
+                "partial_exits": trade_summary.get("partial_exits"),
+            }
+            payload = {
+                "opened_at": opened_at,
+                "closed_at": closed_at,
+                "duration_minutes": duration_minutes,
+                "strategy_name": trade_summary.get("strategy_name", "unknown"),
+                "instrument_class": self._instrument_class,
+                "symbol": trade_summary.get("instrument", ""),
+                "direction": trade_summary.get("direction", ""),
+                "entry_price": trade_summary.get("entry_price"),
+                "exit_price": trade_summary.get("exit_price"),
+                "stop_price": trade_summary.get("original_stop", trade_summary.get("stop_loss")),
+                "tp_price": trade_summary.get("take_profit"),
+                "size": trade_summary.get("lot_size"),
+                "pnl_usd": trade_summary.get("pnl"),
+                "r_multiple": trade_summary.get("r_multiple"),
+                "session": (context or {}).get("session"),
+                "hour_of_day_utc": (context or {}).get("hour"),
+                "day_of_week": (context or {}).get("day_of_week"),
+                "pattern_type": (trade_summary.get("reasoning") or {}).get("trade_type")
+                if isinstance(trade_summary.get("reasoning"), dict)
+                else None,
+                "regime": (context or {}).get("regime"),
+                "confluence_score": trade_summary.get("confluence_score"),
+                "atr_at_entry": (context or {}).get("atr"),
+                "adx_at_entry": (context or {}).get("adx_value"),
+                "prop_firm_style": self._prop_firm_style,
+                "extra_json": str(extra),
+            }
+            self._mega_trade_memory.insert(payload)
+            if self._mega_perf_buckets is not None:
+                self._mega_perf_buckets.invalidate()
+        except Exception as exc:
+            logger.debug("Mega Vision trade-memory insert failed: %s", exc)
 
     # ------------------------------------------------------------------
     # HTF value extraction helpers
@@ -1570,8 +2146,16 @@ class IchimokuBacktester:
             summary["confluence_score"] = signal.confluence_score
             summary["signal_tier"] = signal.quality_tier
             summary["risk_pct"] = self.trade_manager._sizer.get_risk_pct()
+            summary["stop_loss"] = signal.stop_loss
             summary["take_profit"] = signal.take_profit
+            summary["trade_type"] = getattr(signal, "trade_type", "")
             summary["strategy_name"] = getattr(signal, "strategy_name", "ichimoku")
+            summary["reasoning"] = signal.reasoning or {}
+            summary["zone_context"] = getattr(signal, "zone_context", {})
+            summary["wave_targets"] = getattr(signal, "wave_targets", {})
+            summary["elliott_position"] = getattr(signal, "elliott_position", {})
+            summary["cloud_balance_state"] = getattr(signal, "cloud_balance_state", {})
+            summary["kihon_suchi_state"] = getattr(signal, "kihon_suchi_state", {})
             # Build concise entry reason from signal reasoning trace
             reasoning = signal.reasoning or {}
             reason_parts = []
@@ -1648,6 +2232,8 @@ class IchimokuBacktester:
     def _make_screenshot_fn(self, screenshot_dir: str, instrument: str):
         """Return a callable that generates mplfinance charts, or None on import failure."""
         try:
+            import matplotlib
+            matplotlib.use("Agg", force=True)
             import mplfinance as mpf
         except ImportError:
             logger.warning(

@@ -358,9 +358,46 @@ class AdaptiveRunner:
             score = topstep_combine_pass_score(result)
             passed = result.get("passed", False)
 
-            # Persist trial
+            # Persist signal log for this trial
+            telemetry_events = result.pop("_telemetry_events", [])
+            trades = result.pop("_trades", [])
+
+            # Enrich telemetry with trade-level data (trade_type, exit_reason, pnl)
+            trade_map = {}
+            for t in trades:
+                entry_time = t.get("entry_time")
+                if entry_time:
+                    trade_map[str(entry_time)] = t
+
+            for ev in telemetry_events:
+                # Try to match telemetry event to a trade for enrichment
+                ts_key = str(ev.get("timestamp_utc", ""))
+                if ts_key in trade_map:
+                    trade = trade_map[ts_key]
+                    ev["trade_type"] = ev.get("trade_type") or trade.get("trade_type", "")
+                    ev["exit_reason"] = ev.get("exit_reason") or trade.get("exit_reason", trade.get("reason", ""))
+                    ev["pnl_usd"] = ev.get("pnl_usd") or trade.get("pnl_usd")
+                    ev["realized_r"] = ev.get("realized_r") or trade.get("r_multiple")
+                    ev["stop_loss"] = ev.get("stop_loss") or trade.get("original_stop", trade.get("stop_loss"))
+                    ev["take_profit"] = ev.get("take_profit") or trade.get("take_profit")
+                    ev["quality_tier"] = ev.get("quality_tier") or trade.get("signal_tier")
+                    ev["screenshot_path"] = ev.get("screenshot_path") or trade.get("entry_screenshot_path")
+                    ev["entry_screenshot_path"] = ev.get("entry_screenshot_path") or trade.get("entry_screenshot_path")
+                    ev["exit_screenshot_path"] = ev.get("exit_screenshot_path") or trade.get("exit_screenshot_path")
+                    ev["zone_context"] = ev.get("zone_context") or trade.get("zone_context")
+                    ev["wave_targets"] = ev.get("wave_targets") or trade.get("wave_targets")
+                    ev["elliott_position"] = ev.get("elliott_position") or trade.get("elliott_position")
+                    ev["cloud_balance_state"] = ev.get("cloud_balance_state") or trade.get("cloud_balance_state")
+                    ev["kihon_suchi_state"] = ev.get("kihon_suchi_state") or trade.get("kihon_suchi_state")
+                    reasoning = trade.get("reasoning", {})
+                    if isinstance(reasoning, dict) and not ev.get("reasoning_summary"):
+                        ev["reasoning_summary"] = trade.get("entry_reason") or str(reasoning.get("trade_type", ""))
+                        if not ev.get("trade_type"):
+                            ev["trade_type"] = reasoning.get("trade_type", "")
+
+            # Persist trial to optimization_runs
             outcome = result
-            self._store.persist_trial(
+            run_id = self._store.persist_trial(
                 instrument=sym,
                 data_start=data_start,
                 data_end=data_end,
@@ -373,6 +410,16 @@ class AdaptiveRunner:
                 passed_combine=passed,
                 epoch=self._epoch,
             )
+
+            # Persist signal log to DB
+            if telemetry_events and run_id:
+                try:
+                    n_persisted = self._persister.persist_signals(run_id, telemetry_events)
+                    logger.info("Persisted %d signal events for trial %s", n_persisted, run_id)
+                except Exception:
+                    logger.warning("Signal log persistence failed", exc_info=True)
+            elif not telemetry_events:
+                logger.info("No telemetry events to persist for this trial")
 
             if score > best_score:
                 best_score = score
@@ -715,10 +762,54 @@ class AdaptiveRunner:
                 instrument=instrument,
                 log_trades=False,
                 enable_learning=False,
+                enable_screenshots=True,
+                screenshot_dir=str(_PROJECT_ROOT / "reports" / "backtest" / "optimizer_screenshots"),
             )
         except Exception:
             logger.exception("Backtest failed for %s", instrument)
             return None
+
+        # Capture telemetry events for signal_log persistence
+        telemetry_events = []
+        try:
+            raw_events = bt.telemetry.events()
+            logger.debug("Telemetry: %d raw events captured", len(raw_events))
+            for ev in raw_events:
+                ev_dict = {
+                    "timestamp_utc": ev.timestamp_utc,
+                    "event_type": ev.event_type,
+                    "strategy_name": ev.strategy_name,
+                    "direction": ev.direction,
+                    "confluence_score": int(ev.confluence_score or 0),
+                    "price": ev.price,
+                    "stop_loss": ev.planned_stop_pips,
+                    "take_profit": ev.planned_tp_pips,
+                    "filtered_by": ev.rejection_reason or ev.filter_stage,
+                    "entered": ev.event_type == "signal_entered",
+                    "realized_r": ev.realized_r,
+                    "exit_reason": ev.extra.get("exit_reason") if ev.extra else None,
+                    "pnl_usd": ev.extra.get("pnl_usd") if ev.extra else None,
+                    "trade_type": ev.pattern_type or (ev.extra.get("trade_type") if ev.extra else None),
+                    "reasoning_summary": ev.extra.get("reasoning_summary") if ev.extra else None,
+                    "quality_tier": ev.extra.get("quality_tier") if ev.extra else None,
+                    "screenshot_path": ev.extra.get("screenshot_path") if ev.extra else None,
+                    "entry_screenshot_path": ev.extra.get("entry_screenshot_path") if ev.extra else None,
+                    "exit_screenshot_path": ev.extra.get("exit_screenshot_path") if ev.extra else None,
+                    "zone_context": ev.extra.get("zone_context") if ev.extra else None,
+                    "wave_targets": ev.extra.get("wave_targets") if ev.extra else None,
+                    "elliott_position": ev.extra.get("elliott_position") if ev.extra else None,
+                    "cloud_balance_state": ev.extra.get("cloud_balance_state") if ev.extra else None,
+                    "kihon_suchi_state": ev.extra.get("kihon_suchi_state") if ev.extra else None,
+                    "atr": ev.atr,
+                    "adx": ev.adx,
+                    "session": ev.session,
+                    "regime": ev.regime,
+                    "extra": ev.extra or {},
+                }
+                telemetry_events.append(ev_dict)
+            logger.debug("Telemetry: %d events extracted for persistence", len(telemetry_events))
+        except Exception:
+            logger.warning("Telemetry extraction failed", exc_info=True)
 
         # Flatten BacktestResult into a plain dict for the experience store
         metrics = result.metrics if hasattr(result, "metrics") else {}
@@ -767,5 +858,9 @@ class AdaptiveRunner:
             ):
                 if k in snap:
                     out[k] = snap[k]
+
+        # Attach telemetry events and trades for signal_log persistence
+        out["_telemetry_events"] = telemetry_events
+        out["_trades"] = result.trades if hasattr(result, "trades") else []
 
         return out
