@@ -27,7 +27,7 @@ ichimoku     |                  | long  | ?        |   37 |  32 |  86.5% | +0.64
 No chart screenshots available this epoch.
 
 ## Your Prior Analysis
-No prior analysis history.
+Epoch 1: [config skipped, no code changes] **Ichimoku is carrying the entire system.** With +2.40 avg R on shorts (197 trades, 48.7% WR) and +0.64 avg R on longs (37 trades, 86.5% WR), it contributes ~+496R total. Everything else is a drag.  *
 
 ## Current Strategy Code
 ### src/strategy/strategies/sss/strategy.py
@@ -685,6 +685,7 @@ class TrendDirectionFilter(EdgeFilter):
         self._htf_lookback = int(params.get("htf_lookback", 50))
         self._require_both_tf = bool(params.get("require_both_tf", False))
         self._tolerance_pct = float(params.get("tolerance_pct", 0.5))
+        self._block_without_data = bool(params.get("block_without_data", False))
 
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:

@@ -86,6 +86,9 @@ class EMAPullbackStrategy:
         # SL anchor: slow EMA at the bar we armed (updated each bar in ARMED)
         self._armed_slow_ema: Optional[float] = None
 
+        # Max stop distance in ATR multiples (prevents outsized risk on longs)
+        self._max_stop_atr: float = float(self._cfg.get("max_stop_atr", 2.0))
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------

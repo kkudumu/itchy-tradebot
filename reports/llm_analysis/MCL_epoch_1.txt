@@ -1,0 +1,29 @@
+### REASONING
+
+**The dominant signal: MCL has a massive long bias.** Every strategy's long side is profitable; every short side is a net loser (except marginally `asian_breakout` short at +0.32R).
+
+**Longs â€” the edge:**
+- `ema_pullback` long: 908 entries, 43.7% WR, **+1.86R** â€” workhorse; high volume, solid positive expectancy
+- `ichimoku` long: 237 entries, 52.3% WR, **+2.44R** â€” best risk-adjusted edge on MCL
+- `asian_breakout` long: 38 entries, 100% WR, **+7.88R** â€” extraordinary but tiny sample (38 trades across 166 trials = ~0.2/trial); treat as a bonus, not a pillar
+
+**Shorts â€” the drag:**
+- `ema_pullback` short: 786 entries, 26.6% WR, **-0.44R** â€” biggest P&L drain by volume. 786 losing trades at -0.44R â‰ˆ **-346R of cumulative damage** across all trials
+- `ichimoku` short: 65 entries, 23.1% WR, **-0.61R** â€” small volume but worst per-trade expectancy
+- `asian_breakout` short: 64 entries, 50.0% WR, +0.32R â€” marginally positive, net +20R; not worth the complexity
+
+**Root cause: HTF Trend filter is non-functional for MCL.** Every row shows `HTF Trend: ?`, meaning no higher-timeframe trend data is being populated. The `trend_direction` edge filter has a `_block_without_data` attribute that was added (commit `f0beec9`) but **never wired into `should_allow()`** â€” it's a dead param. Result: all 851 short entries pass unfiltered.
+
+**Estimated impact of blocking shorts:** Removing ~850 shorts at avg -0.40R saves ~340R of losses spread across 166 trials (~2R/trial improvement). With avg 36 trades/trial and the long-only pool being net positive, this should push the pass rate well above 50%.
+
+**The 0.0% avg win rate in the trial summary** is a reporting artifact â€” individual strategy WRs are clearly non-zero (43.7%, 52.3%, etc.).
+
+### CONFIG_CHANGES
+```json
+{"config_changes": {"edges.trend_direction.params.default_trend_when_missing": "bullish", "edges.trend_direction.enabled": true}}
+```
+
+### CODE_PATCHES
+```json
+{"code_patches": [{"file": "src/edges/trend_direction.py", "description": "Wire up block_without_data (dead code) and add default_trend_when_missing param â€” when no HTF data exists for MCL, assume bullish trend, which blocks shorts and allows longs through the existing counter-trend logic", "search": "        self._block_without_data = bool(params.get(\"block_without_data\", False))", "replace": "        self._block_without_data = bool(params.get(\"block_without_data\", False))\n        self._default_trend = params.get(\"default_trend_when_missing\", None)"}, {"file": "src/edges/trend_direction.py", "description": "Replace the no-data passthrough with three-tier logic: (1) block_without_data blocks everything, (2) default_trend_when_missing assumes a configurable trend direction so counter-trend shorts are blocked while longs pass, (3) fall back to the original skip behavior", "search": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )\n\n        # Use 1H as primary, 4H as secondary\n        primary_trend = trend_1h or trend_4h or \"neutral\"\n\n        if self._require_both_tf and trend_1h and trend_4h:\n            # Both must agree for a strong trend call\n            if trend_1h != trend_4h:\n                primary_trend = \"neutral\"", "replace": "        if trend_1h is None and trend_4h is None:\n            if self._block_without_data:\n                return EdgeResult(\n                    allowed=False,\n                    edge_name=self.name,\n                    reason=\"no HTF trend data â€” trade blocked (block_without_data=True)\",\n                )\n            if self._default_trend:\n                primary_trend = self._default_trend\n            else:\n                return EdgeResult(\n                    allowed=True,\n                    edge_name=self.name,\n                    reason=\"no HTF trend data â€” filter skipped\",\n                )\n        else:\n            # Use 1H as primary, 4H as secondary\n            primary_trend = trend_1h or trend_4h or \"neutral\"\n\n            if self._require_both_tf and trend_1h and trend_4h:\n                # Both must agree for a strong trend call\n                if trend_1h != trend_4h:\n                    primary_trend = \"neutral\""}]}
+```

@@ -27,7 +27,8 @@ asian_breakout |                  | long  | ?        |   38 |  38 | 100.0% | +7.
 No chart screenshots available this epoch.
 
 ## Your Prior Analysis
-No prior analysis history.
+Epoch 1: [config skipped, no code changes] 
+Epoch 1: [config skipped, no code changes] **The dominant signal: MCL has a massive long bias.** Every strategy's long side is profitable; every short side (except marginally asian_breakout) is a net loser.  **Longs â€” the edge:** - `ema_pull
 
 ## Current Strategy Code
 ### src/strategy/strategies/sss/strategy.py
@@ -685,6 +686,7 @@ class TrendDirectionFilter(EdgeFilter):
         self._htf_lookback = int(params.get("htf_lookback", 50))
         self._require_both_tf = bool(params.get("require_both_tf", False))
         self._tolerance_pct = float(params.get("tolerance_pct", 0.5))
+        self._block_without_data = bool(params.get("block_without_data", False))
 
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
