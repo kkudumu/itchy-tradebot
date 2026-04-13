@@ -45,7 +45,8 @@ trend_direction:
     require_both_tf: false
     tolerance_pct: 0.3
     htf_lookback: 30
-    block_without_data: true
+    block_without_data: false
+    default_trend: bullish
 time_stop:
   enabled: false
   params:
