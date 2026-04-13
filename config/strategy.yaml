@@ -1,45 +1,37 @@
-# Core strategy parameters for the XAU/USD Ichimoku system
-
 active_strategy: ichimoku
-
 strategies:
   ichimoku:
     ichimoku:
       tenkan_period: 9
       kijun_period: 26
       senkou_b_period: 52
-
     adx:
       period: 14
-      threshold: 20  # Standard trending threshold — 28 was filtering out too many valid gold trends
-
+      threshold: 20
     atr:
       period: 14
-      stop_multiplier: 2.5  # Initial stop = 2.5 × ATR beyond entry (widened: 1.5x too tight for gold volatility)
-
+      stop_multiplier: 2.5
     signal:
       min_confluence_score: 1
-      tier_a_plus: 7   # All major factors aligned — full risk allocation
-      tier_b: 5        # Strong signal — 75% risk allocation
-      tier_c: 1        # Minimum viable signal — 50% risk allocation
+      tier_a_plus: 7
+      tier_b: 5
+      tier_c: 1
       timeframes:
-        - "15M"
-        - "5M"
-
+      - 15M
+      - 5M
   asian_breakout:
     enabled: true
     weight: 1.0
-    asian_session_start_utc: "21:00"
-    asian_session_end_utc: "06:00"
-    london_entry_start_utc: "06:00"
-    london_entry_end_utc: "20:00"
+    asian_session_start_utc: '21:00'
+    asian_session_end_utc: 06:00
+    london_entry_start_utc: 06:00
+    london_entry_end_utc: '20:00'
     min_range_pips: 3
     max_range_pips: 80
     rr_ratio: 2.0
     atr_period: 14
-
   ema_pullback:
-    enabled: true
+    enabled: false
     weight: 1.0
     fast_ema: 8
     mid_ema: 18
@@ -51,9 +43,8 @@ strategies:
     pullback_candles_max: 20
     breakout_window_bars: 20
     rr_ratio: 2.0
-
   fx_at_one_glance:
-    tf_mode: hyperscalp_m15_m5   # swing|intraday|hybrid|scalp|hyperscalp_*
+    tf_mode: hyperscalp_m15_m5
     ichimoku:
       tenkan_period: 9
       kijun_period: 26
@@ -74,14 +65,14 @@ strategies:
     divergence:
       enabled: true
       oscillator: rsi
-    five_elements_mode: hard_gate
+    five_elements_mode: soft_filter
     time_theory_mode: soft_filter
     range_filter:
-      adx_min: 20
-      cloud_thickness_min_usd: 0.50
+      adx_min: 15
+      cloud_thickness_min_usd: 0.0
     signal:
-      min_confluence_score: 6
-      min_tier: B
+      min_confluence_score: 4
+      min_tier: C
     exit:
       mode: hybrid
       partial_close_pct: 50
@@ -90,11 +81,13 @@ strategies:
       no_be_before_r: 1.0
       use_heikin_ashi: true
     stop_loss:
-      preference: [fractal, kijun, kumo_edge]
+      preference:
+      - fractal
+      - kijun
+      - kumo_edge
       kijun_buffer_pips: 5
-      max_stop_pips: 100
+      max_stop_pips: 300
       min_rr_ratio: 1.5
-
   sss:
     enabled: true
     weight: 1.0
@@ -108,7 +101,7 @@ strategies:
     require_cbc_context: false
     fifty_tap_level: 0.5
     fifty_tap_tolerance_pips: 0.5
-    entry_mode: "cbc_only"      # cbc_only, fifty_tap, combined
+    entry_mode: cbc_only
     min_confluence_score: 2
     tier_a_plus: 7
     tier_b: 5
@@ -116,29 +109,22 @@ strategies:
     spread_multiplier: 2.0
     min_stop_pips: 10.0
     rr_ratio: 2.0
-
-# Shared config (not strategy-specific)
 risk:
-  initial_risk_pct: 0.5    # % of account risked per trade in Phase 1 (0–+4%)
-  reduced_risk_pct: 0.75   # % of account risked per trade in Phase 2 (>+4%)
-  phase_threshold_pct: 4.0 # Account growth level that triggers phase switch
-  daily_circuit_breaker_pct: 4.5  # Halt trading after 4.5% daily drawdown
-  max_concurrent_positions: 3     # Allow all 3 strategies to hold concurrent positions
-  max_lot_size: 1.0               # Hard cap on lot size per trade
-  min_stop_spread_multiplier: 2.0 # Minimum stop distance = spread * this value
-
+  initial_risk_pct: 0.3
+  reduced_risk_pct: 0.5
+  phase_threshold_pct: 4.0
+  daily_circuit_breaker_pct: 4.5
+  max_concurrent_positions: 3
+  max_lot_size: 1.0
+  min_stop_spread_multiplier: 2.0
 exit:
-  strategy: hybrid_50_50          # Close 50% at TP; trail the remainder
-  tp_r_multiple: 1.5              # Initial TP at 1.5 R (lowered: more achievable with wider stop)
-  trail_type: kijun               # Trailing mechanism: kijun | fixed | atr
-  breakeven_threshold_r: 1.0      # Move SL to BE once price reaches 1 R
-  kijun_trail_start_r: 1.5        # Begin Kijun trail from 1.5 R
-  higher_tf_kijun_start_r: 3.0   # Switch to higher-TF Kijun trail from 3 R
-
+  strategy: hybrid_50_50
+  tp_r_multiple: 1.5
+  trail_type: kijun
+  breakeven_threshold_r: 1.0
+  kijun_trail_start_r: 1.5
+  higher_tf_kijun_start_r: 3.0
 prop_firm:
-  # TopstepX $50K Combine (dollar-based trailing MLL)
-  # The style discriminator is read by the pydantic PropFirmConfig
-  # union to pick the concrete schema at load time.
   style: topstep_combine_dollar
   name: topstep_50k_combine
   account_size: 50000
@@ -148,45 +134,11 @@ prop_firm:
   consistency_pct: 50.0
   max_micro_contracts: 50
   max_full_contracts: 5
-  daily_reset_tz: "America/Chicago"
+  daily_reset_tz: America/Chicago
   daily_reset_hour: 17
-
-# Legacy the5ers 2-step High Stakes Classic config — kept for reference.
-# To switch back: uncomment this block (and comment the topstep block above)
-# OR copy these values into a the5ers-specific strategy.yaml via CONFIG_DIR.
-# prop_firm:
-#   style: the5ers_pct_phased
-#   name: the5ers_2step_high_stakes
-#   account_size: 10000
-#   leverage: 100
-#   phase_1:
-#     profit_target_pct: 8.0
-#     max_loss_pct: 10.0
-#     daily_loss_pct: 5.0
-#     time_limit_days: 0
-#   phase_2:
-#     profit_target_pct: 5.0
-#     max_loss_pct: 10.0
-#     daily_loss_pct: 5.0
-#     time_limit_days: 0
-#   funded:
-#     monthly_target_pct: 10.0
-#     max_loss_pct: 10.0
-#     daily_loss_pct: 5.0
-
-# ------------------------------------------------------------------
-# Strategy selector — two different fields read by two code paths:
-#   * active_strategy  (singular): legacy field read by
-#     src/strategy/loader.py for live mode. Leave as "ichimoku" so
-#     the live engine defaults to the original behavior.
-#   * active_strategies (plural): read by the multi-strategy
-#     dispatcher in src/backtesting/vectorbt_engine.py. Lists every
-#     strategy the backtest should blend.
-# ------------------------------------------------------------------
-# Temporarily isolated for FXAOG backtest — restore full blend after
 active_strategies:
-  - fx_at_one_glance
-#  - ichimoku
-#  - asian_breakout
-#  - ema_pullback
-#  - sss
+- sss
+- fx_at_one_glance
+- ichimoku
+- asian_breakout
+- ema_pullback

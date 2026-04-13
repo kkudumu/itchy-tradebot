@@ -1,110 +1,83 @@
-# Edge toggle configuration — all 12 filters
-# Each entry follows the pattern:
-#   enabled: bool   — master switch; false bypasses the filter entirely
-#   params: {}      — edge-specific defaults (may be overridden per instrument)
-
-# 1. Time-of-day filter
 time_of_day:
   enabled: false
   params:
-    start_utc: "06:00"
-    end_utc: "21:00"
-
-# 2. Day-of-week filter (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
+    start_utc: 06:00
+    end_utc: '21:00'
 day_of_week:
   enabled: false
   params:
-    allowed_days: [1, 2, 3]  # Tuesday, Wednesday, Thursday
-
-# 3. London open delay — suppress entries for the first 30 min of the session
+    allowed_days:
+    - 1
+    - 2
+    - 3
 london_open_delay:
   enabled: false
   params:
-    london_open_utc: "08:00"
+    london_open_utc: 08:00
     delay_minutes: 30
-
-# 4. Candle close confirmation — require H1 candle to close beyond the cloud
 candle_close_confirmation:
   enabled: false
   params: {}
-
-# 5. Spread filter — skip when spread exceeds threshold (points)
 spread_filter:
   enabled: false
   params:
-    max_spread_points: 30  # 30 pts ≈ $0.30/oz for gold
-
-# 6. News filter — block entries around high-impact red-flag events
+    max_spread_points: 30
 news_filter:
   enabled: false
   params:
     block_minutes_before: 30
     block_minutes_after: 30
     impact_levels:
-      - red
-
-# 7. Friday close — force-close all positions before the weekend
+    - red
 friday_close:
   enabled: true
   params:
-    close_time_utc: "20:00"
-    day: 4  # Friday
-
-# 8. Regime filter — require trending conditions (ADX + cloud thickness)
+    close_time_utc: '20:00'
+    day: 4
 regime_filter:
   enabled: false
   params:
     adx_min: 28
-    cloud_thickness_percentile: 50  # Must be above the rolling median
-
-# 9. Time stop — exit at breakeven if trade stalls (< 0.5 R in N candles)
+    cloud_thickness_percentile: 50
+trend_direction:
+  enabled: true
+  params:
+    require_both_tf: false
+    tolerance_pct: 0.3
 time_stop:
   enabled: false
   params:
     candle_limit: 12
     breakeven_r_threshold: 0.5
-
-# 10. Bollinger Band squeeze — boost confidence on expansion from squeeze
 bb_squeeze:
   enabled: false
   params:
     bb_period: 20
     bb_std: 2.0
-    squeeze_threshold: 0.05   # Bandwidth ratio below which squeeze is active
-    confidence_boost: 1       # Score points added when expansion confirmed
-
-# 11. Confluence scoring — minimum score gate + tiered position sizing
+    squeeze_threshold: 0.05
+    confidence_boost: 1
 confluence_scoring:
   enabled: false
   params:
     min_score: 4
-    tier_a_plus_threshold: 7  # Full size
-    tier_b_threshold: 5       # 75% size
-    tier_c_threshold: 4       # 50% size
+    tier_a_plus_threshold: 7
+    tier_b_threshold: 5
+    tier_c_threshold: 4
     tier_b_size_pct: 0.75
-    tier_c_size_pct: 0.50
-
-# 12. Equity curve filter — reduce size when equity dips below its MA
+    tier_c_size_pct: 0.5
 equity_curve:
   enabled: false
   params:
-    lookback_trades: 20        # Rolling window of closed trades
+    lookback_trades: 20
     reduced_size_multiplier: 0.5
-
-# 13. Event proximity — block entries near NFP, FOMC, CPI releases
 event_proximity:
   enabled: false
   params:
     hours_before: 4
     hours_after: 2
-
-# Trading costs — deducted from P&L per trade (round-turn)
 trading_costs:
-  commission_per_lot: 4.00     # USD per standard lot, round-turn (The5ers High Stakes)
-  spread_points: 0.15          # USD per oz price penalty (15 MT5 points, conservative)
-
-# Strategy-specific edge filter profiles
-# Each strategy can override the global filter settings above.
+  commission_per_lot: 4.0
+  spread_points: 0.15
 strategy_profiles:
   sss:
     spread:
