@@ -5,11 +5,11 @@ Your job: analyze all the data below, find patterns, identify what's
 working and what's broken, and produce specific actionable changes.
 
 ## Trial Summary
-Total trials: 111
+Total trials: 124
 Combine passes: 0 (0.0%)
 Best return: 0.00%
 Worst return: -3.62%
-Avg trades per trial: 7
+Avg trades per trial: 6
 Avg win rate: 0.0%
 
 
@@ -25,7 +25,9 @@ fx_at_one_glance |                  | long  | ?        |   33 |  11 |  33.3% | -
 No chart screenshots available this epoch.
 
 ## Your Prior Analysis
-No prior analysis history.
+Epoch 1: [config skipped, no code changes] **1. ema_pullback is catastrophically mistuned for MYM (Micro Dow).** - Short: 18.0% WR, -0.78 avg R across 122 entries = massive capital drain - Long: 30.6% WR, -0.51 avg R across 111 entries = still
+Epoch 1: [config skipped, no code changes] **1. ema_pullback is a total loss on MYM â€” disable immediately.** - Short: 18.0% WR, -0.78 avg R across 122 entries. For every $1 risked, you lose $0.78 on average. - Long: 30.6% WR, -0.51 avg R acr
+Epoch 1: [config skipped, no code changes] **Zero combine passes across 122 trials with 0.00% best return â€” every trial loses money.** The damage comes from two sources:  **1. ema_pullback is a catastrophic capital drain on MYM.** - Short: 1
 
 ## Current Strategy Code
 ### src/strategy/strategies/sss/strategy.py

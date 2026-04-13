@@ -1,38 +1,38 @@
 {
   "run_id": "backtest",
-  "total_events": 595,
+  "total_events": 521,
   "per_strategy": {
     "ema_pullback": {
-      "generated": 372,
-      "entered": 0,
+      "generated": 265,
+      "entered": 6,
       "rejected": 0,
-      "exited": 0,
-      "entry_rate_pct": 0.0
+      "exited": 6,
+      "entry_rate_pct": 2.26
     },
     "fx_at_one_glance": {
-      "generated": 223,
-      "entered": 0,
+      "generated": 222,
+      "entered": 11,
       "rejected": 0,
-      "exited": 0,
-      "entry_rate_pct": 0.0
+      "exited": 11,
+      "entry_rate_pct": 4.95
     }
   },
   "per_session": {
-    "asian": 174,
-    "london": 87,
-    "off": 89,
-    "overlap": 61,
-    "ny": 184
+    "london": 57,
+    "overlap": 55,
+    "ny": 165,
+    "off": 123,
+    "asian": 121
   },
   "per_pattern": {
-    "kumo_breakout": 107,
-    "kijun_bounce": 31,
-    "ffo": 3,
-    "kumo_twist": 44,
-    "kijun_break": 18,
-    "walking_dragon": 4,
-    "fractal_breakout": 10,
-    "rolling_dragon": 6
+    "kumo_breakout": 123,
+    "kijun_break": 11,
+    "kijun_bounce": 23,
+    "kumo_twist": 34,
+    "fractal_breakout": 20,
+    "ffo": 2,
+    "rolling_dragon": 4,
+    "walking_dragon": 5
   },
   "top_rejection_stages": {}
 }

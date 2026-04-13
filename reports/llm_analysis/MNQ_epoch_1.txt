@@ -1,0 +1,56 @@
+### REASONING
+
+**Ichimoku is carrying the entire system.** With +2.40 avg R on shorts (197 trades, 48.7% WR) and +0.64 avg R on longs (37 trades, 86.5% WR), it contributes ~+496R total. Everything else is a drag.
+
+**ema_pullback is a net loser on MNQ.** Longs: 678 trades at -0.33R = ~-224R. Shorts: 803 trades at -0.01R = ~-8R. Combined: ~-232R across 1,481 trades. The 43.4% WR on longs with negative avg R means it's winning small and losing big â€” the R:R profile is inverted. With the default `rr_ratio: 2.0`, this means stops are being hit far more often than TPs, and the winning trades are closing early (likely via trailing or kijun exit) for less than 1R while the losers run the full stop. Disabling this strategy on MNQ is the highest-impact single change.
+
+**fx_at_one_glance is marginally net positive** but only because shorts (+0.58R, 453 trades = +263R) outweigh the bad longs (-0.34R, 581 trades = -198R). Net ~+65R. The long side is the problem â€” same pattern as ema_pullback where longs bleed.
+
+**HTF trend filtering is completely broken.** Every single row shows `HTF Trend: ?`, meaning `htf_trend_1h` and `htf_trend_4h` are both `None` in the edge context. The `TrendDirectionFilter.should_allow()` code returns `allowed=True` with "no HTF trend data â€” filter skipped" when both are missing. This is the root cause of the bad longs â€” without trend filtering, all three strategies take counter-trend longs freely. The recent commit mentions a fallback SMA trend was added but the indicator values aren't being populated into the edge context for MNQ.
+
+**SSS strategy is absent** from the signal analysis â€” it's either disabled or not calibrated for MNQ (its defaults target XAUUSD with gold-specific pip values).
+
+**The 38.2% pass rate is dragged down by ema_pullback's 1,481 losing trades.** Removing them and fixing trend filtering on the remaining strategies should materially increase pass rate.
+
+### CONFIG_CHANGES
+```json
+{"config_changes": {
+  "strategies.ema_pullback.enabled": false,
+  "strategies.ichimoku.min_confluence_score": 3,
+  "strategies.ichimoku.kijun_proximity_atr": 0.7,
+  "edges.trend_direction.enabled": true,
+  "edges.trend_direction.params.block_without_data": true,
+  "edges.trend_direction.params.tolerance_pct": 0.3
+}}
+```
+
+Rationale:
+- **Disable ema_pullback**: Net -232R, the single biggest drag. No amount of tuning fixes an inverted R:R profile on MNQ.
+- **Lower ichimoku min_confluence_score 4â†’3**: Ichimoku longs are 86.5% WR but only 37 trades â€” the confluence gate is too strict. Loosening it should increase ichimoku trade count without degrading quality much given the +2.40R shorts and +0.64R longs.
+- **Widen kijun_proximity_atr 0.5â†’0.7**: Same goal â€” let more ichimoku entries through. The 5M kijun pullback requirement is filtering out valid entries that are slightly beyond 0.5Ã—ATR.
+- **Enable trend_direction with block_without_data=true**: Force the filter to block trades when no HTF data exists instead of passing everything through. This protects fx_at_one_glance longs from counter-trend entries.
+- **Tighten tolerance_pct 0.5â†’0.3**: Narrower deadband means the trend filter classifies more price action as trending rather than neutral, blocking more counter-trend trades.
+
+### CODE_PATCHES
+```json
+{"code_patches": [
+  {
+    "file": "src/edges/trend_direction.py",
+    "description": "Block trades when no HTF trend data exists instead of passing them through. The current behavior lets every counter-trend trade through unfiltered when HTF indicators aren't populated (which is the case for MNQ, hence all trades showing HTF Trend: ?). New block_without_data param defaults to false for backwards compatibility.",
+    "search": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )",
+    "replace": "        if trend_1h is None and trend_4h is None:\n            block = bool(self._config.get(\"params\", {}).get(\"block_without_data\", False))\n            return EdgeResult(\n                allowed=not block,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” \" + (\"blocked (block_without_data=true)\" if block else \"filter skipped\"),\n            )"
+  },
+  {
+    "file": "src/edges/trend_direction.py",
+    "description": "Read block_without_data from params in __init__ for consistency with other params, and cache it as an instance attribute for cleaner access.",
+    "search": "        self._htf_lookback = int(params.get(\"htf_lookback\", 50))\n        self._require_both_tf = bool(params.get(\"require_both_tf\", False))\n        self._tolerance_pct = float(params.get(\"tolerance_pct\", 0.5))",
+    "replace": "        self._htf_lookback = int(params.get(\"htf_lookback\", 50))\n        self._require_both_tf = bool(params.get(\"require_both_tf\", False))\n        self._tolerance_pct = float(params.get(\"tolerance_pct\", 0.5))\n        self._block_without_data = bool(params.get(\"block_without_data\", False))"
+  },
+  {
+    "file": "src/edges/trend_direction.py",
+    "description": "Use the cached instance attribute instead of re-reading config in the hot path.",
+    "search": "        if trend_1h is None and trend_4h is None:\n            block = bool(self._config.get(\"params\", {}).get(\"block_without_data\", False))\n            return EdgeResult(\n                allowed=not block,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” \" + (\"blocked (block_without_data=true)\" if block else \"filter skipped\"),\n            )",
+    "replace": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=not self._block_without_data,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” \" + (\"blocked (block_without_data=true)\" if self._block_without_data else \"filter skipped\"),\n            )"
+  }
+]}
+```

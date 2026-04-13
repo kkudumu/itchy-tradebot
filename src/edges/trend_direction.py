@@ -35,6 +35,7 @@ class TrendDirectionFilter(EdgeFilter):
         self._htf_lookback = int(params.get("htf_lookback", 50))
         self._require_both_tf = bool(params.get("require_both_tf", False))
         self._tolerance_pct = float(params.get("tolerance_pct", 0.5))
+        self._block_without_data = bool(params.get("block_without_data", False))
 
     def should_allow(self, context: EdgeContext) -> EdgeResult:
         if not self.enabled:
