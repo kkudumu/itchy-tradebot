@@ -22,6 +22,8 @@ strategies:
     min_confluence_score: 3
     kijun_proximity_atr: 0.7
     weight: 1.5
+    allowed_directions:
+    - long
   asian_breakout:
     enabled: true
     weight: 1.3
@@ -46,6 +48,8 @@ strategies:
     pullback_candles_max: 20
     breakout_window_bars: 20
     rr_ratio: 2.0
+    allowed_directions:
+    - long
   fx_at_one_glance:
     tf_mode: hyperscalp_m15_m5
     ichimoku:
