@@ -183,7 +183,10 @@ class DailyCircuitBreaker:
         if self._daily_start_balance <= 0 or self._triggered:
             return 0.0
 
-        max_loss_amount = self._daily_start_balance * (self._max_daily_loss_pct / 100.0)
+        if self._max_daily_loss_usd is not None:
+            max_loss_amount = float(self._max_daily_loss_usd)
+        else:
+            max_loss_amount = self._daily_start_balance * (self._max_daily_loss_pct / 100.0)
         already_lost = max(0.0, self._daily_start_balance - current_balance)
         remaining = max_loss_amount - already_lost
         return max(0.0, remaining)

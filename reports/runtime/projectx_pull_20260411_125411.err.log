@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\kkudu\AppData\Local\Temp\projectx_pull_20260411_125411.py", line 2, in <module>
+    from scripts.download_projectx_gold import _PROJECT_ROOT, download_futures_series
+ModuleNotFoundError: No module named 'scripts.download_projectx_gold'

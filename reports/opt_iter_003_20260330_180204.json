@@ -1,0 +1,444 @@
+{
+  "run_id": "opt_iter_003_20260330_180204",
+  "timestamp": "2026-03-30T18:05:14.857958+00:00",
+  "metrics": {
+    "win_rate": 0.0667,
+    "profit_factor": 11.5622,
+    "expectancy": 6.4394,
+    "total_trades": 30.0,
+    "avg_r_multiple": 6.4394,
+    "avg_win_r": 105.7364,
+    "avg_loss_r": -0.6532,
+    "gross_profit_r": 211.4728,
+    "gross_loss_r": 18.29,
+    "sharpe_ratio": -0.3385,
+    "sortino_ratio": -0.0568,
+    "calmar_ratio": -0.4146,
+    "max_drawdown_pct": 0.7447,
+    "max_daily_dd_pct": 0.4034,
+    "total_return_pct": -0.3088,
+    "avg_trade_duration": "442 days, 16:33:12.553177",
+    "consecutive_wins_max": 1.0,
+    "consecutive_losses_max": 19.0,
+    "dd_peak_date": "2025-01-01 18:00:00+00:00",
+    "dd_trough_date": "2025-01-14 21:50:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 9969.12
+  },
+  "best_trades": [
+    {
+      "entry_time": "2025-01-20 06:45:00+00:00",
+      "exit_time": "2026-03-30 18:05:14.749927+00:00",
+      "entry_price": 2707.605,
+      "exit_price": 4318.379,
+      "direction": "long",
+      "r_multiple": 211.4639797827233,
+      "pnl": null,
+      "confluence_score": 4,
+      "signal_tier": "C",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-14 08:20:00+00:00",
+      "exit_time": "2026-03-30 18:02:19.773647+00:00",
+      "entry_price": 2665.985,
+      "exit_price": 2665.979,
+      "direction": "short",
+      "r_multiple": 0.008829876073100158,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-06 05:45:00+00:00",
+      "exit_time": "2026-03-30 18:02:08.928204+00:00",
+      "entry_price": 2633.625,
+      "exit_price": 2630.055,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-06 20:45:00+00:00",
+      "exit_time": "2026-03-30 18:02:11.388112+00:00",
+      "entry_price": 2640.198,
+      "exit_price": 2644.495,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-08 08:00:00+00:00",
+      "exit_time": "2026-03-30 18:02:13.704389+00:00",
+      "entry_price": 2655.985,
+      "exit_price": 2669.298,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 1,
+      "signal_tier": "B",
+      "edge_results": null
+    }
+  ],
+  "worst_trades": [
+    {
+      "entry_time": "2025-01-06 13:20:00+00:00",
+      "exit_time": "2026-03-30 18:02:09.816197+00:00",
+      "entry_price": 2638.095,
+      "exit_price": 2636.225,
+      "direction": "long",
+      "r_multiple": -1.628549023960348,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-10 03:05:00+00:00",
+      "exit_time": "2026-03-30 18:02:15.124331+00:00",
+      "entry_price": 2678.648,
+      "exit_price": 2675.038,
+      "direction": "long",
+      "r_multiple": -1.2460929164977148,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-13 00:10:00+00:00",
+      "exit_time": "2026-03-30 18:02:16.819746+00:00",
+      "entry_price": 2684.828,
+      "exit_price": 2687.235,
+      "direction": "short",
+      "r_multiple": -1.1992443982196006,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-12 20:25:00+00:00",
+      "exit_time": "2026-03-30 18:02:16.032259+00:00",
+      "entry_price": 2680.435,
+      "exit_price": 2689.275,
+      "direction": "short",
+      "r_multiple": -1.0910743733440595,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-14 16:20:00+00:00",
+      "exit_time": "2026-03-30 18:02:20.853911+00:00",
+      "entry_price": 2677.348,
+      "exit_price": 2673.595,
+      "direction": "long",
+      "r_multiple": -1.057245218032125,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    }
+  ],
+  "edge_stats": {},
+  "config_snapshot": {
+    "atr_stop_multiplier": 2.5,
+    "atr_period": 14,
+    "adx_period": 14,
+    "adx_threshold": 20,
+    "tenkan_period": 9,
+    "kijun_period": 26,
+    "senkou_b_period": 52,
+    "min_confluence_score": 1,
+    "tier_a_plus": 7,
+    "tier_b": 5,
+    "tier_c": 1,
+    "timeframes": [
+      "15M",
+      "5M"
+    ],
+    "initial_risk_pct": 0.5,
+    "reduced_risk_pct": 0.75,
+    "phase_threshold_pct": 4.0,
+    "daily_circuit_breaker_pct": 4.5,
+    "max_concurrent_positions": 3,
+    "strategy": "hybrid_50_50",
+    "tp_r_multiple": 1.5,
+    "trail_type": "kijun",
+    "breakeven_threshold_r": 1.0,
+    "kijun_trail_start_r": 1.5,
+    "higher_tf_kijun_start_r": 3.0,
+    "active_strategy": "ichimoku",
+    "prop_firm": {
+      "name": "the5ers_2step_high_stakes",
+      "account_size": 10000,
+      "leverage": 100,
+      "phase_1": {
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "phase_2": {
+        "profit_target_pct": 5.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "funded": {
+        "monthly_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0
+      }
+    },
+    "active_strategies": [
+      "ichimoku",
+      "asian_breakout",
+      "ema_pullback"
+    ],
+    "asian_breakout": {
+      "enabled": true,
+      "weight": 1.0,
+      "asian_session_start_utc": "21:00",
+      "asian_session_end_utc": "06:00",
+      "london_entry_start_utc": "06:00",
+      "london_entry_end_utc": "20:00",
+      "min_range_pips": 3,
+      "max_range_pips": 80,
+      "rr_ratio": 2.0,
+      "atr_period": 14
+    },
+    "ema_pullback": {
+      "enabled": true,
+      "weight": 1.0,
+      "fast_ema": 8,
+      "mid_ema": 18,
+      "slow_ema": 50,
+      "atr_period": 14,
+      "min_ema_angle_deg": 2,
+      "max_ema_angle_deg": 95,
+      "pullback_candles_min": 1,
+      "pullback_candles_max": 20,
+      "breakout_window_bars": 20,
+      "rr_ratio": 2.0
+    },
+    "edges": {
+      "time_of_day": {
+        "enabled": false,
+        "params": {
+          "start_utc": "06:00",
+          "end_utc": "21:00"
+        }
+      },
+      "day_of_week": {
+        "enabled": false,
+        "params": {
+          "allowed_days": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "london_open_delay": {
+        "enabled": false,
+        "params": {
+          "london_open_utc": "08:00",
+          "delay_minutes": 30
+        }
+      },
+      "candle_close_confirmation": {
+        "enabled": false,
+        "params": {}
+      },
+      "spread_filter": {
+        "enabled": false,
+        "params": {
+          "max_spread_points": 30
+        }
+      },
+      "news_filter": {
+        "enabled": false,
+        "params": {
+          "block_minutes_before": 30,
+          "block_minutes_after": 30,
+          "impact_levels": [
+            "red"
+          ]
+        }
+      },
+      "friday_close": {
+        "enabled": true,
+        "params": {
+          "close_time_utc": "20:00",
+          "day": 4
+        }
+      },
+      "regime_filter": {
+        "enabled": false,
+        "params": {
+          "adx_min": 28,
+          "cloud_thickness_percentile": 50
+        }
+      },
+      "time_stop": {
+        "enabled": false,
+        "params": {
+          "candle_limit": 12,
+          "breakeven_r_threshold": 0.5
+        }
+      },
+      "bb_squeeze": {
+        "enabled": false,
+        "params": {
+          "bb_period": 20,
+          "bb_std": 2.0,
+          "squeeze_threshold": 0.05,
+          "confidence_boost": 1
+        }
+      },
+      "confluence_scoring": {
+        "enabled": false,
+        "params": {
+          "min_score": 4,
+          "tier_a_plus_threshold": 7,
+          "tier_b_threshold": 5,
+          "tier_c_threshold": 4,
+          "tier_b_size_pct": 0.75,
+          "tier_c_size_pct": 0.5
+        }
+      },
+      "equity_curve": {
+        "enabled": false,
+        "params": {
+          "lookback_trades": 20,
+          "reduced_size_multiplier": 0.5
+        }
+      }
+    }
+  },
+  "comparison": {
+    "has_previous": true,
+    "avg_loss_r": {
+      "current": -0.6532,
+      "previous": -0.6532,
+      "delta": 0.0
+    },
+    "avg_r_multiple": {
+      "current": 6.4394,
+      "previous": 6.4394,
+      "delta": 0.0
+    },
+    "avg_win_r": {
+      "current": 105.7364,
+      "previous": 105.7364,
+      "delta": 0.0
+    },
+    "calmar_ratio": {
+      "current": -0.4146,
+      "previous": -0.4146,
+      "delta": 0.0
+    },
+    "consecutive_losses_max": {
+      "current": 19.0,
+      "previous": 19.0,
+      "delta": 0.0
+    },
+    "consecutive_wins_max": {
+      "current": 1.0,
+      "previous": 1.0,
+      "delta": 0.0
+    },
+    "expectancy": {
+      "current": 6.4394,
+      "previous": 6.4394,
+      "delta": 0.0
+    },
+    "final_equity": {
+      "current": 9969.12,
+      "previous": 9969.12,
+      "delta": 0.0
+    },
+    "gross_loss_r": {
+      "current": 18.29,
+      "previous": 18.29,
+      "delta": 0.0
+    },
+    "gross_profit_r": {
+      "current": 211.4728,
+      "previous": 211.4728,
+      "delta": 0.0
+    },
+    "initial_balance": {
+      "current": 10000.0,
+      "previous": 10000.0,
+      "delta": 0.0
+    },
+    "max_daily_dd_pct": {
+      "current": 0.4034,
+      "previous": 0.4034,
+      "delta": 0.0
+    },
+    "max_drawdown_pct": {
+      "current": 0.7447,
+      "previous": 0.7447,
+      "delta": 0.0
+    },
+    "profit_factor": {
+      "current": 11.5622,
+      "previous": 11.5622,
+      "delta": 0.0
+    },
+    "sharpe_ratio": {
+      "current": -0.3385,
+      "previous": -0.3385,
+      "delta": 0.0
+    },
+    "sortino_ratio": {
+      "current": -0.0568,
+      "previous": -0.0568,
+      "delta": 0.0
+    },
+    "total_return_pct": {
+      "current": -0.3088,
+      "previous": -0.3088,
+      "delta": 0.0
+    },
+    "total_trades": {
+      "current": 30.0,
+      "previous": 30.0,
+      "delta": 0.0
+    },
+    "win_rate": {
+      "current": 0.0667,
+      "previous": 0.0667,
+      "delta": 0.0
+    }
+  },
+  "challenge_simulation": {
+    "pass_rate": 0.0,
+    "rolling_pass_rate": 0.0,
+    "monte_carlo_pass_rate": 0.0,
+    "total_windows": 1001,
+    "full_pass_count": 0,
+    "phase_1_pass_count": 1001,
+    "avg_days_phase_1": 12.649000000000001,
+    "avg_days_phase_2": 0.0,
+    "failure_breakdown": {
+      "no_trades": 1001
+    },
+    "funded_avg_monthly_return": 0.0,
+    "months_above_10pct": 0
+  },
+  "claude_reasoning": "You've hit your limit \u00b7 resets 12pm (America/Los_Angeles)\n",
+  "claude_prompt": "You are a quantitative trading strategy optimizer for a The5ers 2-Step prop firm challenge.\n\n## Current Run: opt_iter_003_20260330_180204\n### Challenge Simulation Results\n- Pass Rate:              0.0%\n- Phase 1 Passes:         1001/1001\n- Phase 2 Passes:         0/1001\n- Avg Days Phase 1:       13\n- Avg Days Phase 2:       0\n\n### Failure Breakdown\n- no_trades: 1001\n\n**BIGGEST FAILURE MODE: no_trades** -- prioritize fixing this.\n\n### Secondary Metrics\n- Sharpe Ratio:   N/A\n- Win Rate:       0.0667\n- Trade Count:    N/A\n- Max Drawdown:   N/A\n- Profit Factor:  11.5622\n\n### Trade Details (worst first)\n- long @ 2638.09 -> 2636.22  R=-1.63  reason: ?\n- long @ 2678.65 -> 2675.04  R=-1.25  reason: ?\n- short @ 2684.83 -> 2687.24  R=-1.20  reason: ?\n- short @ 2680.43 -> 2689.28  R=-1.09  reason: ?\n- long @ 2677.35 -> 2673.59  R=-1.06  reason: ?\n- long @ 2707.61 -> 4318.38  R=211.46  reason: ?\n- short @ 2665.99 -> 2665.98  R=0.01  reason: ?\n- long @ 2633.62 -> 2630.05  R=0.00  reason: ?\n- long @ 2640.20 -> 2644.49  R=0.00  reason: ?\n- long @ 2655.99 -> 2669.30  R=0.00  reason: ?\n\n## Similar Past Configurations\nNone available yet.\n\n## Accumulated Strategy Learnings\nStrategy Learnings (most recent last):\n  Run opt_iter_001_20260330_173002: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_002_20260330_174717: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n\n## Current Config Snapshot\n```yaml\nactive_strategies:\n- ichimoku\n- asian_breakout\n- ema_pullback\nactive_strategy: ichimoku\nadx_period: 14\nadx_threshold: 20\nasian_breakout:\n  asian_session_end_utc: 06:00\n  asian_session_start_utc: '21:00'\n  atr_period: 14\n  enabled: true\n  london_entry_end_utc: '20:00'\n  london_entry_start_utc: 06:00\n  max_range_pips: 80\n  min_range_pips: 3\n  rr_ratio: 2.0\n  weight: 1.0\natr_period: 14\natr_stop_multiplier: 2.5\nbreakeven_threshold_r: 1.0\ndaily_circuit_breaker_pct: 4.5\nedges:\n  bb_squeeze:\n    enabled: false\n    params:\n      bb_period: 20\n      bb_std: 2.0\n      confidence_boost: 1\n      squeeze_threshold: 0.05\n  candle_close_confirmation:\n    enabled: false\n    params: {}\n  confluence_scoring:\n    enabled: false\n    params:\n      min_score: 4\n      tier_a_plus_threshold: 7\n      tier_b_size_pct: 0.75\n      tier_b_threshold: 5\n      tier_c_size_pct: 0.5\n      tier_c_threshold: 4\n  day_of_week:\n    enabled: false\n    params:\n      allowed_days:\n      - 1\n      - 2\n      - 3\n  equity_curve:\n    enabled: false\n    params:\n      lookback_trades: 20\n      reduced_size_multiplier: 0.5\n  friday_close:\n    enabled: true\n    params:\n      close_time_utc: '20:00'\n      day: 4\n  london_open_delay:\n    enabled: false\n    params:\n      delay_minutes: 30\n      london_open_utc: 08:00\n  news_filter:\n    enabled: false\n    params:\n      block_minutes_after: 30\n      block_minutes_before: 30\n      impact_levels:\n      - red\n  regime_filter:\n    enabled: false\n    params:\n      adx_min: 28\n      cloud_thickness_percentile: 50\n  spread_filter:\n    enabled: false\n    params:\n      max_spread_points: 30\n  time_of_day:\n    enabled: false\n    params:\n      end_utc: '21:00'\n      start_utc: 06:00\n  time_stop:\n    enabled: false\n    params:\n      breakeven_r_threshold: 0.5\n      candle_limit: 12\nema_pullback:\n  atr_period: 14\n  breakout_window_bars: 20\n  enabled: true\n  fast_ema: 8\n  max_ema_angle_deg: 95\n  mid_ema: 18\n  min_ema_angle_deg: 2\n  pullback_candles_max: 20\n  pullback_candles_min: 1\n  rr_ratio: 2.0\n  slow_ema: 50\n  weight: 1.0\nhigher_tf_kijun_start_r: 3.0\ninitial_risk_pct: 0.5\nkijun_period: 26\nkijun_trail_start_r: 1.5\nmax_concurrent_positions: 3\nmin_confluence_score: 1\nphase_threshold_pct: 4.0\nprop_firm:\n  account_size: 10000\n  funded:\n    daily_loss_pct: 5.0\n    max_loss_pct: 10.0\n    monthly_target_pct: 10.0\n  leverage: 100\n  name: the5ers_2step_high_stakes\n  phase_1:\n    daily_loss_pct: 5.0\n    max_loss_pct: 10.0\n    profit_target_pct: 8.0\n    time_limit_days: 0\n  phase_2:\n    daily_loss_pct: 5.0\n    max_loss_pct: 10.0\n    profit_target_pct: 5.0\n    time_limit_days: 0\nreduced_risk_pct: 0.75\nsenkou_b_period: 52\nstrategy: hybrid_50_50\ntenkan_period: 9\ntier_a_plus: 7\ntier_b: 5\ntier_c: 1\ntimeframes:\n- 15M\n- 5M\ntp_r_multiple: 1.5\ntrail_type: kijun\n```\n\n## Your Task\nImprove the challenge pass rate. Target: >= 50%\n\nANALYSIS REQUIRED (write this BEFORE making changes):\n1. What is the BIGGEST problem? (e.g., too few trades, all trades losing, SL too tight)\n2. WHY is this happening? Trace the logic: which strategy is firing, what's the entry quality, why are exits failing?\n3. What specific parameter change would fix the root cause?\n4. What is your confidence level and what could go wrong?\n\nWrite at least 3-5 paragraphs of detailed reasoning before making any edits.\n\nSTRICT CONSTRAINTS:\n1. Make AT MOST 2 parameter changes total across both config files.\n2. You may edit ANY of these files:\n   - config/strategy.yaml \u2014 strategy parameters\n "
+}

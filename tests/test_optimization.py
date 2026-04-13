@@ -166,6 +166,30 @@ class TestPropFirmObjectiveParams:
             assert 3 <= params["min_confluence_score"] <= 6
 
 
+class TestSSSOptunaAdapter:
+    """Verify the SSS-specific search space covers the active futures profile."""
+
+    def test_ranges_cover_futures_style_defaults(self):
+        from src.strategy.strategies.sss.optuna_params import SSSOptunaAdapter
+
+        adapter = SSSOptunaAdapter()
+        study = optuna.create_study(direction="maximize")
+
+        seen_entry_modes = set()
+        for _ in range(40):
+            trial = study.ask()
+            params = adapter.suggest_params(trial)["strategies"]["sss"]
+            assert 0.3 <= params["min_swing_pips"] <= 5.0
+            assert 6 <= params["ss_candle_min"] <= 15
+            assert 2 <= params["iss_candle_min"] <= 5
+            assert 5 <= params["iss_candle_max"] <= 8
+            assert 0 <= params["min_confluence_score"] <= 4
+            seen_entry_modes.add(params["entry_mode"])
+
+        assert seen_entry_modes.issubset({"cbc_only", "fifty_tap", "combined"})
+        assert seen_entry_modes
+
+
 # =============================================================================
 # 2. PropFirmObjective — penalty logic
 # =============================================================================
@@ -248,6 +272,50 @@ class TestPropFirmPenalties:
         good_result = _make_result(sharpe=1.0)
         bad_result = _make_result(sharpe=-1.0)
         assert self._call_with_result(good_result) > self._call_with_result(bad_result)
+
+    def test_topstep_style_uses_topstep_objective(self):
+        """Dollar-combine configs should optimize against the Topstep score."""
+        from src.optimization.objectives import (
+            PropFirmObjective,
+            topstep_combine_pass_score,
+        )
+
+        result = _make_result(total_return=3.0)
+        result.prop_firm = {
+            "status": "ongoing",
+            "active_tracker": {
+                "status": "failed_daily_loss_limit",
+                "initial_balance": 50_000.0,
+                "current_balance": 50_900.0,
+                "profit_target_usd": 3_000.0,
+            },
+        }
+
+        obj = PropFirmObjective(
+            backtester=MagicMock(),
+            data=pd.DataFrame(),
+            base_config={"prop_firm": {"style": "topstep_combine_dollar"}},
+        )
+        obj._run_backtest = MagicMock(return_value=result)
+
+        study = optuna.create_study(direction="maximize")
+        trial = study.ask()
+        assert obj(trial) == topstep_combine_pass_score(result) + 0.2
+
+    def test_topstep_style_no_trades_is_hard_penalty(self):
+        from src.optimization.objectives import PropFirmObjective
+
+        result = _make_result(n_trades=0, total_return=0.0)
+        obj = PropFirmObjective(
+            backtester=MagicMock(),
+            data=pd.DataFrame(),
+            base_config={"prop_firm": {"style": "topstep_combine_dollar"}},
+        )
+        obj._run_backtest = MagicMock(return_value=result)
+
+        study = optuna.create_study(direction="maximize")
+        trial = study.ask()
+        assert obj(trial) == -2.0
 
 
 # =============================================================================

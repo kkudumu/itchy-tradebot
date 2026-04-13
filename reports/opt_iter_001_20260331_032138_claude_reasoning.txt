@@ -1,0 +1,10 @@
+## Changes Applied
+
+### Code Bug Fix — `src/risk/trade_manager.py:243-246`
+**Stop-out trades now exit at the stop level, not bar close.** When `_stop_hit` triggers intrabar (e.g., bar_low breaches stop for longs), the trade was being archived at `current_price` (bar close), which can be far worse than the actual stop fill. This inflated every losing trade by 30-60% (e.g., -1.61R instead of -1.0R). The fix sets `trade.current_r = decision.r_multiple` (the correct stop-level R) and archives at `trade.stop_loss`. Estimated impact: reduces gross losses by ~28%, improving PF from ~0.97 to ~1.36.
+
+### Parameter Change 1 — `atr_stop_multiplier: 2.5 → 1.5`
+Tighter stops reduce the TP target from 3.75 ATR to 2.25 ATR (with 1.5R TP) or 3.0 ATR (with 2.0R TP), making it far easier to reach. This should significantly increase the 7.89% win rate and generate more trades through faster trade resolution, addressing both the total_dd and no_trades failure modes.
+
+### Parameter Change 2 — `tp_r_multiple: 1.5 → 2.0`
+With the tighter 1.5 ATR stop, the absolute TP target at 2.0R = 3.0 ATR is still easier to reach than the previous 3.75 ATR setup, while capturing 33% more profit per partial exit. This aligns with the exit manager's documented "2R target" design.

@@ -1,0 +1,442 @@
+{
+  "run_id": "opt_iter_010_20260330_184738",
+  "timestamp": "2026-03-30T18:50:53.480609+00:00",
+  "metrics": {
+    "win_rate": 0.0667,
+    "profit_factor": 11.5622,
+    "expectancy": 6.4394,
+    "total_trades": 30.0,
+    "avg_r_multiple": 6.4394,
+    "avg_win_r": 105.7364,
+    "avg_loss_r": -0.6532,
+    "gross_profit_r": 211.4728,
+    "gross_loss_r": 18.29,
+    "sharpe_ratio": -0.3385,
+    "sortino_ratio": -0.0568,
+    "calmar_ratio": -0.4146,
+    "max_drawdown_pct": 0.7447,
+    "max_daily_dd_pct": 0.4034,
+    "total_return_pct": -0.3088,
+    "avg_trade_duration": "442 days, 17:18:46.253579",
+    "consecutive_wins_max": 1.0,
+    "consecutive_losses_max": 19.0,
+    "dd_peak_date": "2025-01-01 18:00:00+00:00",
+    "dd_trough_date": "2025-01-14 21:50:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 9969.12
+  },
+  "best_trades": [
+    {
+      "entry_time": "2025-01-20 06:45:00+00:00",
+      "exit_time": "2026-03-30 18:50:53.368418+00:00",
+      "entry_price": 2707.605,
+      "exit_price": 4318.379,
+      "direction": "long",
+      "r_multiple": 211.4639797827233,
+      "pnl": null,
+      "confluence_score": 4,
+      "signal_tier": "C",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-14 08:20:00+00:00",
+      "exit_time": "2026-03-30 18:47:53.229277+00:00",
+      "entry_price": 2665.985,
+      "exit_price": 2665.979,
+      "direction": "short",
+      "r_multiple": 0.008829876073100158,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-06 05:45:00+00:00",
+      "exit_time": "2026-03-30 18:47:43.053682+00:00",
+      "entry_price": 2633.625,
+      "exit_price": 2630.055,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-06 20:45:00+00:00",
+      "exit_time": "2026-03-30 18:47:45.435702+00:00",
+      "entry_price": 2640.198,
+      "exit_price": 2644.495,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-08 08:00:00+00:00",
+      "exit_time": "2026-03-30 18:47:47.412943+00:00",
+      "entry_price": 2655.985,
+      "exit_price": 2669.298,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 1,
+      "signal_tier": "B",
+      "edge_results": null
+    }
+  ],
+  "worst_trades": [
+    {
+      "entry_time": "2025-01-06 13:20:00+00:00",
+      "exit_time": "2026-03-30 18:47:43.991262+00:00",
+      "entry_price": 2638.095,
+      "exit_price": 2636.225,
+      "direction": "long",
+      "r_multiple": -1.628549023960348,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-10 03:05:00+00:00",
+      "exit_time": "2026-03-30 18:47:48.569723+00:00",
+      "entry_price": 2678.648,
+      "exit_price": 2675.038,
+      "direction": "long",
+      "r_multiple": -1.2460929164977148,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-13 00:10:00+00:00",
+      "exit_time": "2026-03-30 18:47:50.127339+00:00",
+      "entry_price": 2684.828,
+      "exit_price": 2687.235,
+      "direction": "short",
+      "r_multiple": -1.1992443982196006,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-12 20:25:00+00:00",
+      "exit_time": "2026-03-30 18:47:49.392921+00:00",
+      "entry_price": 2680.435,
+      "exit_price": 2689.275,
+      "direction": "short",
+      "r_multiple": -1.0910743733440595,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-01-14 16:20:00+00:00",
+      "exit_time": "2026-03-30 18:47:53.884073+00:00",
+      "entry_price": 2677.348,
+      "exit_price": 2673.595,
+      "direction": "long",
+      "r_multiple": -1.057245218032125,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    }
+  ],
+  "edge_stats": {},
+  "config_snapshot": {
+    "atr_stop_multiplier": 2.5,
+    "atr_period": 14,
+    "adx_period": 14,
+    "adx_threshold": 20,
+    "tenkan_period": 9,
+    "kijun_period": 26,
+    "senkou_b_period": 52,
+    "min_confluence_score": 1,
+    "tier_a_plus": 7,
+    "tier_b": 5,
+    "tier_c": 1,
+    "timeframes": [
+      "15M",
+      "5M"
+    ],
+    "initial_risk_pct": 0.5,
+    "reduced_risk_pct": 0.75,
+    "phase_threshold_pct": 4.0,
+    "daily_circuit_breaker_pct": 4.5,
+    "max_concurrent_positions": 3,
+    "strategy": "hybrid_50_50",
+    "tp_r_multiple": 1.5,
+    "trail_type": "kijun",
+    "breakeven_threshold_r": 1.0,
+    "kijun_trail_start_r": 1.5,
+    "higher_tf_kijun_start_r": 3.0,
+    "active_strategy": "ichimoku",
+    "prop_firm": {
+      "name": "the5ers_2step_high_stakes",
+      "account_size": 10000,
+      "leverage": 100,
+      "phase_1": {
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "phase_2": {
+        "profit_target_pct": 5.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "funded": {
+        "monthly_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0
+      }
+    },
+    "active_strategies": [
+      "ichimoku",
+      "asian_breakout",
+      "ema_pullback"
+    ],
+    "asian_breakout": {
+      "enabled": true,
+      "weight": 1.0,
+      "asian_session_start_utc": "21:00",
+      "asian_session_end_utc": "06:00",
+      "london_entry_start_utc": "06:00",
+      "london_entry_end_utc": "20:00",
+      "min_range_pips": 3,
+      "max_range_pips": 80,
+      "rr_ratio": 2.0,
+      "atr_period": 14
+    },
+    "ema_pullback": {
+      "enabled": true,
+      "weight": 1.0,
+      "fast_ema": 8,
+      "mid_ema": 18,
+      "slow_ema": 50,
+      "atr_period": 14,
+      "min_ema_angle_deg": 2,
+      "max_ema_angle_deg": 95,
+      "pullback_candles_min": 1,
+      "pullback_candles_max": 20,
+      "breakout_window_bars": 20,
+      "rr_ratio": 2.0
+    },
+    "edges": {
+      "time_of_day": {
+        "enabled": false,
+        "params": {
+          "start_utc": "06:00",
+          "end_utc": "21:00"
+        }
+      },
+      "day_of_week": {
+        "enabled": false,
+        "params": {
+          "allowed_days": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "london_open_delay": {
+        "enabled": false,
+        "params": {
+          "london_open_utc": "08:00",
+          "delay_minutes": 30
+        }
+      },
+      "candle_close_confirmation": {
+        "enabled": false,
+        "params": {}
+      },
+      "spread_filter": {
+        "enabled": false,
+        "params": {
+          "max_spread_points": 30
+        }
+      },
+      "news_filter": {
+        "enabled": false,
+        "params": {
+          "block_minutes_before": 30,
+          "block_minutes_after": 30,
+          "impact_levels": [
+            "red"
+          ]
+        }
+      },
+      "friday_close": {
+        "enabled": true,
+        "params": {
+          "close_time_utc": "20:00",
+          "day": 4
+        }
+      },
+      "regime_filter": {
+        "enabled": false,
+        "params": {
+          "adx_min": 28,
+          "cloud_thickness_percentile": 50
+        }
+      },
+      "time_stop": {
+        "enabled": false,
+        "params": {
+          "candle_limit": 12,
+          "breakeven_r_threshold": 0.5
+        }
+      },
+      "bb_squeeze": {
+        "enabled": false,
+        "params": {
+          "bb_period": 20,
+          "bb_std": 2.0,
+          "squeeze_threshold": 0.05,
+          "confidence_boost": 1
+        }
+      },
+      "confluence_scoring": {
+        "enabled": false,
+        "params": {
+          "min_score": 4,
+          "tier_a_plus_threshold": 7,
+          "tier_b_threshold": 5,
+          "tier_c_threshold": 4,
+          "tier_b_size_pct": 0.75,
+          "tier_c_size_pct": 0.5
+        }
+      },
+      "equity_curve": {
+        "enabled": false,
+        "params": {
+          "lookback_trades": 20,
+          "reduced_size_multiplier": 0.5
+        }
+      }
+    }
+  },
+  "comparison": {
+    "has_previous": true,
+    "avg_loss_r": {
+      "current": -0.6532,
+      "previous": -0.6532,
+      "delta": 0.0
+    },
+    "avg_r_multiple": {
+      "current": 6.4394,
+      "previous": 6.4394,
+      "delta": 0.0
+    },
+    "avg_win_r": {
+      "current": 105.7364,
+      "previous": 105.7364,
+      "delta": 0.0
+    },
+    "calmar_ratio": {
+      "current": -0.4146,
+      "previous": -0.4146,
+      "delta": 0.0
+    },
+    "consecutive_losses_max": {
+      "current": 19.0,
+      "previous": 19.0,
+      "delta": 0.0
+    },
+    "consecutive_wins_max": {
+      "current": 1.0,
+      "previous": 1.0,
+      "delta": 0.0
+    },
+    "expectancy": {
+      "current": 6.4394,
+      "previous": 6.4394,
+      "delta": 0.0
+    },
+    "final_equity": {
+      "current": 9969.12,
+      "previous": 9969.12,
+      "delta": 0.0
+    },
+    "gross_loss_r": {
+      "current": 18.29,
+      "previous": 18.29,
+      "delta": 0.0
+    },
+    "gross_profit_r": {
+      "current": 211.4728,
+      "previous": 211.4728,
+      "delta": 0.0
+    },
+    "initial_balance": {
+      "current": 10000.0,
+      "previous": 10000.0,
+      "delta": 0.0
+    },
+    "max_daily_dd_pct": {
+      "current": 0.4034,
+      "previous": 0.4034,
+      "delta": 0.0
+    },
+    "max_drawdown_pct": {
+      "current": 0.7447,
+      "previous": 0.7447,
+      "delta": 0.0
+    },
+    "profit_factor": {
+      "current": 11.5622,
+      "previous": 11.5622,
+      "delta": 0.0
+    },
+    "sharpe_ratio": {
+      "current": -0.3385,
+      "previous": -0.3385,
+      "delta": 0.0
+    },
+    "sortino_ratio": {
+      "current": -0.0568,
+      "previous": -0.0568,
+      "delta": 0.0
+    },
+    "total_return_pct": {
+      "current": -0.3088,
+      "previous": -0.3088,
+      "delta": 0.0
+    },
+    "total_trades": {
+      "current": 30.0,
+      "previous": 30.0,
+      "delta": 0.0
+    },
+    "win_rate": {
+      "current": 0.0667,
+      "previous": 0.0667,
+      "delta": 0.0
+    }
+  },
+  "challenge_simulation": {
+    "pass_rate": 0.0,
+    "rolling_pass_rate": 0.0,
+    "monte_carlo_pass_rate": 0.0,
+    "total_windows": 1001,
+    "full_pass_count": 0,
+    "phase_1_pass_count": 1001,
+    "avg_days_phase_1": 12.6805,
+    "avg_days_phase_2": 0.0,
+    "failure_breakdown": {
+      "no_trades": 1001
+    },
+    "funded_avg_monthly_return": 0.0,
+    "months_above_10pct": 0
+  }
+}

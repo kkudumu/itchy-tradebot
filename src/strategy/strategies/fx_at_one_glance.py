@@ -39,17 +39,32 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
         self._use_chikou = mode['chikou']
         self._ichi_entry = mode['ichi_entry']
 
+        signal_cfg = cfg.get('signal') if isinstance(cfg.get('signal'), dict) else {}
+        exit_cfg = cfg.get('exit') if isinstance(cfg.get('exit'), dict) else {}
+        stop_cfg = cfg.get('stop_loss') if isinstance(cfg.get('stop_loss'), dict) else {}
+        range_cfg = cfg.get('range_filter') if isinstance(cfg.get('range_filter'), dict) else {}
+
         self._fe_mode = cfg.get('five_elements_mode', 'hard_gate')
         self._tt_mode = cfg.get('time_theory_mode', 'soft_filter')
-        self._min_score = cfg.get('min_confluence_score', 6)
-        self._min_tier = cfg.get('min_tier', 'B')
+        self._min_score = int(cfg.get('min_confluence_score', signal_cfg.get('min_confluence_score', 6)))
+        self._min_tier = str(cfg.get('min_tier', signal_cfg.get('min_tier', 'B')))
         self._max_kijun_dist = cfg.get('max_kijun_distance_pips', 200.0)
-        self._kijun_buffer = cfg.get('kijun_buffer_pips', 5.0)
-        self._max_stop = cfg.get('max_stop_pips', 100.0)
-        self._min_rr = cfg.get('min_rr_ratio', 1.5)
-        self._primary_target_key = cfg.get('primary_target', 'n_value')
-        self._exit_mode = cfg.get('exit_mode', 'hybrid')
-        self._partial_pct = cfg.get('partial_close_pct', 0.5)
+        self._kijun_buffer = float(cfg.get('kijun_buffer_pips', stop_cfg.get('kijun_buffer_pips', 5.0)))
+        self._max_stop = float(cfg.get('max_stop_pips', stop_cfg.get('max_stop_pips', 100.0)))
+        self._min_rr = float(cfg.get('min_rr_ratio', stop_cfg.get('min_rr_ratio', 1.5)))
+        self._primary_target_key = str(cfg.get('primary_target', exit_cfg.get('primary_target', 'n_value')))
+        self._exit_mode = str(cfg.get('exit_mode', exit_cfg.get('mode', 'hybrid')))
+        partial_pct = float(cfg.get('partial_close_pct', exit_cfg.get('partial_close_pct', 0.5)))
+        self._partial_pct = partial_pct / 100.0 if partial_pct > 1.0 else partial_pct
+        self._adx_min = float(cfg.get('adx_min', range_cfg.get('adx_min', 20.0)))
+        self._cloud_thickness_min = float(
+            cfg.get('cloud_thickness_min_usd', range_cfg.get('cloud_thickness_min_usd', 0.50))
+        )
+        self._signal_cooldown_bars = int(cfg.get('signal_cooldown_bars', 0) or 0)
+        self._reentry_price_tolerance = float(cfg.get('reentry_price_tolerance_points', 5.0))
+        self._reentry_stop_tolerance = float(cfg.get('reentry_stop_tolerance_points', 2.0))
+        self._decision_counter = 0
+        self._last_signal_state = None
 
         # Build evaluator requirements based on TF mode
         both = [self._bias_tf, self._entry_tf]
@@ -83,10 +98,23 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
             tk_cross: 1=bullish, -1=bearish, 0=none
             chikou_confirmed: 1=bullish, -1=bearish, 0=neutral
         """
-        ichi = matrix.get(f'ichimoku_{self._entry_tf}')
-        if not ichi:
-            return None
-        meta = ichi.metadata
+        bias_ichi = matrix.get(f'ichimoku_{self._bias_tf}')
+        entry_ichi = matrix.get(f'ichimoku_{self._entry_tf}')
+
+        # Hyperscalp "stripped" entry modes use the higher timeframe for
+        # directional Ichimoku bias and keep the lower timeframe focused on
+        # timing / price action. Requiring a full lower-TF Ichimoku checklist
+        # here over-constrains 15M/5M entries and collapses signal frequency.
+        if self._ichi_entry == 'stripped':
+            if not bias_ichi:
+                return None
+            ichi_result = bias_ichi
+            meta = bias_ichi.metadata
+        else:
+            if not entry_ichi:
+                return None
+            ichi_result = entry_ichi
+            meta = entry_ichi.metadata
 
         # Chikou gate: inside (0) = ranging = block
         if self._use_chikou and meta.get('chikou_confirmed', 0) == 0:
@@ -97,16 +125,22 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
             if rsi and abs(rsi.metadata.get('rsi', 50) - 50) < 5:
                 return None  # RSI too close to 50 = no conviction
 
-        if ichi.direction > 0:
+        if ichi_result.direction > 0:
             direction = 'long'
-        elif ichi.direction < 0:
+        elif ichi_result.direction < 0:
             direction = 'short'
         else:
             return None
 
+        if self._ichi_entry == 'stripped':
+            cloud_pos = meta.get('cloud_position', 0)
+            if direction == 'long' and cloud_pos == -1:
+                return None
+            if direction == 'short' and cloud_pos == 1:
+                return None
+
         # Bias TF alignment (cloud_position is int: 1=above, -1=below, 0=inside)
-        bias_ichi = matrix.get(f'ichimoku_{self._bias_tf}')
-        if bias_ichi:
+        if bias_ichi and self._ichi_entry != 'stripped':
             bias_pos = bias_ichi.metadata.get('cloud_position', 0)
             if direction == 'long' and bias_pos == -1:  # below cloud
                 return None
@@ -134,12 +168,12 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
         return tt.metadata.get('is_cycle_date', False)
 
     def _filter_range(self, matrix):
-        """Triple range filter: ADX>20 + cloud balance disequilibrium + cloud thickness."""
+        """Range filter: ADX floor + cloud-thickness floor on the entry timeframe."""
         adx = matrix.get(f'adx_{self._entry_tf}')
-        if adx and adx.metadata.get('adx', 0) < 20:
+        if adx and adx.metadata.get('adx', 0) < self._adx_min:
             return False
         ichi = matrix.get(f'ichimoku_{self._entry_tf}')
-        if ichi and ichi.metadata.get('cloud_thickness', 999) < 0.50:
+        if ichi and ichi.metadata.get('cloud_thickness', 999) < self._cloud_thickness_min:
             return False
         return True
 
@@ -155,7 +189,10 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
         kijun = meta.get('kijun')
         tenkan = meta.get('tenkan')
         if kijun is not None and tenkan is not None:
-            derived['kijun_distance_pips'] = abs(tenkan - kijun) * 10  # approx for gold
+            # Use ATR-relative distance instead of gold-specific pip conversion
+            atr_eval = matrix.get(f'atr_{self._entry_tf}')
+            atr_val = atr_eval.metadata.get('atr', 1.0) if atr_eval else 1.0
+            derived['kijun_distance_pips'] = (abs(tenkan - kijun) / max(atr_val, 1e-9)) * 100
         else:
             derived['kijun_distance_pips'] = 9999
         # TK cross (int: 1=bullish, -1=bearish, 0=none)
@@ -351,6 +388,7 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
 
     # --- Main decide() ---
     def decide(self, eval_matrix):
+        self._decision_counter += 1
         direction = self._checklist_direction(eval_matrix)
         if not direction:
             return None
@@ -417,6 +455,16 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
             except AttributeError:
                 pass
 
+        if self._should_suppress_signal(direction, entry_price, stop_loss):
+            return None
+
+        self._last_signal_state = {
+            'bar': self._decision_counter,
+            'direction': direction,
+            'entry_price': float(entry_price),
+            'stop_loss': float(stop_loss),
+        }
+
         return Signal(
             timestamp=datetime.now(timezone.utc),
             instrument=self._instrument,
@@ -435,6 +483,27 @@ class FXAtOneGlance(Strategy, key='fx_at_one_glance'):
                 'quality_tier': confluence.quality_tier,
                 **confluence.breakdown,
             },
+        )
+
+    def _should_suppress_signal(self, direction, entry_price, stop_loss):
+        if self._signal_cooldown_bars <= 0 or self._last_signal_state is None:
+            return False
+
+        bars_since = self._decision_counter - int(self._last_signal_state.get('bar', 0))
+        if bars_since > self._signal_cooldown_bars:
+            return False
+        if direction != self._last_signal_state.get('direction'):
+            return False
+
+        prev_entry = float(self._last_signal_state.get('entry_price', entry_price))
+        prev_stop = float(self._last_signal_state.get('stop_loss', stop_loss))
+        prev_risk = abs(prev_entry - prev_stop)
+        entry_tol = max(self._reentry_price_tolerance, prev_risk * 0.75)
+        stop_tol = self._reentry_stop_tolerance
+
+        return (
+            abs(float(entry_price) - prev_entry) <= entry_tol
+            and abs(float(stop_loss) - prev_stop) <= stop_tol
         )
 
     def suggest_params(self, trial):

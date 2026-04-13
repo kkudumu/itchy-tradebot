@@ -1,0 +1,12 @@
+## Changes Made
+
+**1. Code fix — `src/strategy/strategies/asian_breakout.py`** (bug fix, not a parameter change):
+- The `on_bar()` method hardcoded `in_london_window = 6 <= hour < 10`, ignoring the configured `london_entry_start_utc: "06:00"` and `london_entry_end_utc: "20:00"`. 
+- Now parses these config values in `__init__` and uses them for the window check.
+- **Effect**: Entry window expands from 4 hours (06:00-10:00) to 14 hours (06:00-20:00), capturing breakouts during London afternoon and NY session. Since the strategy fires max 1 signal/day, this adds signals on days where the breakout was previously missed — not multiple signals per day.
+
+**2. Parameter change — `config/strategy.yaml`** (1 of 2 allowed):
+- Added `kijun_proximity_atr: 1.5` to the ichimoku signal section (was using hardcoded default of 0.5).
+- **Effect**: Triples the zone around the 5M kijun line where Ichimoku entries are valid. This is the final gate in the Ichimoku pipeline (line 143-145) and was killing most signals that survived the 15M cloud/TK/chikou filters. With XAU ATR ~$25, the entry zone expands from ~$12.50 to ~$37.50 around kijun.
+
+Both changes directly target the `no_trades` failure mode (818/1003 = 81.6%) by generating substantially more trade signals across all three strategies.

@@ -1,0 +1,8 @@
+## Changes Made (2 parameter changes)
+
+| Parameter | Old | New | Rationale |
+|-----------|-----|-----|-----------|
+| `initial_risk_pct` | 0.5% | 0.3% | Extends survival from ~20 to ~33 trades before 10% drawdown. P(33 consecutive losses) = 43% vs P(20) = 60% |
+| `reduced_risk_pct` | 0.75% | 0.4% | Was *increasing* risk after gains (0.5→0.75%), now properly *reduces* it (0.3→0.4%). Protects the 4%+ buffer instead of gambling it away |
+
+**Why these two:** The strategy is a "whale hunter" — it needs to *survive* long losing streaks to catch rare R=136+ runners. Both changes extend the survival window. A single big winner at 0.3% risk still generates 40%+ account growth, easily passing both phases. The critical fix is `reduced_risk_pct`: increasing risk after building a buffer was actively sabotaging accounts that were on track to pass.

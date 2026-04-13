@@ -1,0 +1,70 @@
+Now I have the full picture. Here's my analysis:
+
+### REASONING
+
+**1. ema_pullback is catastrophically mistuned for MYM (Micro Dow).**
+- Short: 18.0% WR, -0.78 avg R across 122 entries = massive capital drain
+- Long: 30.6% WR, -0.51 avg R across 111 entries = still a net loser
+- Combined, ema_pullback accounts for 233 of ~322 total entries (72% of all trades) and is losing on every single dimension
+- Root cause: the strategy uses `sl = slow_ema` as stop loss (line 305 in ema_pullback.py). With `slow_ema=50` on 1-minute bars and MYM's tick_size of 1.0 point ($0.50/tick), the stop distance from the 50-EMA to entry is often either too tight (whipsawed) or too wide (huge losses when hit). The pullback_candles_max=20 is absurdly wide for a $0.50/tick instrument, letting the strategy arm on any minor wiggle
+- **Action: disable ema_pullback entirely on MYM.** It's generating 72% of trades and losing on all of them
+
+**2. fx_at_one_glance short is the only profitable pattern (+0.05 avg R, 58.9% WR).**
+- 56 entries, 33 wins = genuinely edge-positive
+- But avg R of +0.05 is barely positive â€” the wins are small relative to the losses, suggesting the stop loss is too wide or TP is too conservative
+- The 58.9% WR is excellent and suggests the directional bias detection works well for shorts on MYM
+- **Action: keep enabled, lower min_confluence_score to get more of these signals, tighten stops**
+
+**3. fx_at_one_glance long is a clear loser (33.3% WR, -0.50 avg R).**
+- Only 33 entries with 11 wins â€” too few to be statistically robust, but the -0.50 avg R is definitive
+- This aligns with MYM being in a downtrend during the test period (Dow weakness)
+- **Action: should be filtered by trend direction, but HTF trend is showing "?"**
+
+**4. HTF Trend filter is broken â€” showing "?" for ALL 322 entries.**
+- The `_classify_htf_trend()` function requires `kijun_1h` and `kijun_4h` from HTF DataFrames
+- For MYM (futures), these columns must exist in the resampled HTF data. If the Ichimoku evaluator isn't running on 1H/4H timeframes for MYM, `htf_vals` will have no `kijun_1h`/`kijun_4h`, so trend classification returns None
+- With trend filter effectively disabled, counter-trend longs bleed through freely
+- **Action: ensure trend filter data is populated; in the meantime, this is likely why longs are losing**
+
+**5. Zero combine passes with 0.0% best return.**
+- With ema_pullback hemorrhaging capital and fx_at_one_glance long dragging down the marginally profitable shorts, no trial can accumulate the $3000 needed to pass
+- 7 avg trades/trial is very low for a combine â€” need more signal volume from profitable patterns
+
+**6. Stop loss computation for fx_at_one_glance uses `kijun_buffer_pips: 5`.**
+- On MYM where tick_size=1.0 and pip_value_usd=0.50, a 5 "pip" buffer translates to 5 index points = $2.50/contract. The `kijun_distance_pips` calc uses `* 10` (gold convention, line 192), which is completely wrong for Dow futures at ~40,000 vs gold at ~3,000. This makes kijun distance artificially large, preventing proper stop placement
+
+### CONFIG_CHANGES
+```json
+{"config_changes": {
+  "strategies.ema_pullback.enabled": false,
+  "strategies.fx_at_one_glance.signal.min_confluence_score": 4,
+  "strategies.fx_at_one_glance.signal.min_tier": "C",
+  "strategies.fx_at_one_glance.five_elements_mode": "soft_filter",
+  "strategies.fx_at_one_glance.stop_loss.max_stop_pips": 300,
+  "strategies.fx_at_one_glance.stop_loss.min_rr_ratio": 1.5,
+  "strategies.fx_at_one_glance.range_filter.adx_min": 15,
+  "strategies.fx_at_one_glance.range_filter.cloud_thickness_min_usd": 0.0,
+  "edges.trend_direction.enabled": true,
+  "edges.trend_direction.params.tolerance_pct": 0.3,
+  "risk.initial_risk_pct": 0.3,
+  "risk.reduced_risk_pct": 0.5
+}}
+```
+
+### CODE_PATCHES
+```json
+{"code_patches": [
+  {
+    "file": "src/strategy/strategies/fx_at_one_glance.py",
+    "description": "Fix kijun_distance_pips calculation â€” the *10 multiplier is gold-specific (1 pip = $0.10). For futures like MYM (tick_size=1.0), this inflates distances by 10x, breaking stop placement and trade type detection thresholds",
+    "search": "        if kijun is not None and tenkan is not None:\n            derived['kijun_distance_pips'] = abs(tenkan - kijun) * 10  # approx for gold",
+    "replace": "        if kijun is not None and tenkan is not None:\n            # Use ATR-relative distance instead of gold-specific pip conversion\n            atr_eval = matrix.get(f'atr_{self._entry_tf}')\n            atr_val = atr_eval.metadata.get('atr', 1.0) if atr_eval else 1.0\n            derived['kijun_distance_pips'] = (abs(tenkan - kijun) / max(atr_val, 1e-9)) * 100"
+  },
+  {
+    "file": "src/edges/trend_direction.py",
+    "description": "Add fallback trend detection using a simple SMA when HTF kijun data is not available â€” currently returns 'filter skipped' when kijun_1h/4h are missing, which disables trend filtering entirely for instruments without full Ichimoku HTF data",
+    "search": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )",
+    "replace": "        if trend_1h is None and trend_4h is None:\n            # Fallback: use any available SMA/EMA trend hint from indicator_values\n            ema_trend = context.indicator_values.get(\"ema_trend_bias\")\n            if ema_trend is not None:\n                primary_trend = ema_trend\n            else:\n                return EdgeResult(\n                    allowed=True,\n                    edge_name=self.name,\n                    reason=\"no HTF trend data â€” filter skipped\",\n                )"
+  }
+]}
+```

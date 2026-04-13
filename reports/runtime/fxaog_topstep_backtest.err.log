@@ -1,0 +1,29 @@
+00:20:58  INFO      run_demo_challenge — Starting demo challenge — mode=backtest instrument=XAUUSD balance=from config
+00:20:58  INFO      run_demo_challenge — === BACKTEST MODE ===
+00:20:59  INFO      run_demo_challenge — Config loaded from C:\Users\kkudu\Documents\Code\itchy-tradebot\config
+00:20:59  INFO      run_demo_challenge — Loading data from data/projectx_mgc_1m_20260101_20260409.parquet
+00:20:59  INFO      run_demo_challenge — Loaded 56995 bars from 2026-02-09 01:01:00+00:00 to 2026-04-09 23:58:00+00:00
+00:21:01  INFO      src.backtesting.live_dashboard — Live dashboard running at http://127.0.0.1:8501
+00:21:02  INFO      run_demo_challenge — Live dashboard: http://127.0.0.1:8501
+00:21:02  INFO      run_demo_challenge — Running backtest on 56995 bars ...
+00:21:03  INFO      src.backtesting.vectorbt_engine — Starting backtest on 56995 1M bars for XAUUSD
+00:21:03  INFO      src.backtesting.vectorbt_engine — Adaptive learning enabled — phases: mechanical \u2192 statistical \u2192 similarity
+00:21:03  INFO      src.monitoring.health_monitor — HealthMonitor: normal \u2192 drought_detected (drought: 0 signals in last 500 bars)
+00:21:03  INFO      src.monitoring.adaptive_relaxer — AdaptiveRelaxer: applied tier 1 'day_of_week' (budget 5.0%)
+00:21:03  INFO      src.monitoring.health_monitor — HealthMonitor: drought_detected \u2192 relaxing (relaxing tier 1)
+00:21:03  INFO      src.monitoring.health_monitor — HealthMonitor: relaxing \u2192 monitoring_relaxed (signals found under relaxed config)
+00:21:05  INFO      src.monitoring.health_monitor — HealthMonitor: monitoring_relaxed \u2192 halted (strategy broken: rolling win rate 40.0% vs baseline 55.0%)
+00:21:09  WARNING   src.monitoring.adaptive_relaxer — AdaptiveRelaxer: 3 consecutive losses — auto-tightening 1 tier(s)
+00:21:09  INFO      src.monitoring.adaptive_relaxer — AdaptiveRelaxer: tightened one tier — reverted 'day_of_week' (budget 0.0%)
+00:21:10  WARNING   src.monitoring.adaptive_relaxer — AdaptiveRelaxer: 3 consecutive losses — auto-tightening 0 tier(s)
+00:21:11  WARNING   src.monitoring.adaptive_relaxer — AdaptiveRelaxer: 3 consecutive losses — auto-tightening 0 tier(s)
+00:21:16  WARNING   src.monitoring.adaptive_relaxer — AdaptiveRelaxer: 3 consecutive losses — auto-tightening 0 tier(s)
+00:21:17  WARNING   src.monitoring.adaptive_relaxer — AdaptiveRelaxer: 3 consecutive losses — auto-tightening 0 tier(s)
+00:21:53  INFO      src.backtesting.vectorbt_engine — Pipeline: generated=4242 | filtered_in_trade=682 | filtered_no_open=3428 | filtered_edge=10 | filtered_learning=0 | filtered_open_rejected=76 | entered=37 | coord_matrix_ok=0 | coord_matrix_none=0
+00:21:53  INFO      src.backtesting.vectorbt_engine — Logged 37 trades to database
+00:21:53  INFO      src.backtesting.vectorbt_engine — Backtest complete: 37 trades, win_rate=32.4%, return=-1.13%, prop_firm=failed_timeout, learning_phase=mechanical, learning_skipped=0
+00:21:53  INFO      src.backtesting.vectorbt_engine — Strategy telemetry: 4279 events written to reports\backtest
+00:21:53  INFO      src.backtesting.strategy_telemetry — Strategy telemetry summary (run_id=backtest):
+00:21:54  INFO      src.backtesting.strategy_telemetry —   sss            : 4242 generated \u2192 37 entered (0.87%), 0 rejected
+00:21:54  INFO      run_demo_challenge — Equity curve saved to reports\equity_curve_20260411_072154.csv
+00:21:55  INFO      src.backtesting.dashboard — Dashboard saved to reports\dashboard_20260411_072155.html

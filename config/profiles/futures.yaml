@@ -57,9 +57,29 @@ strategy_overrides:
     max_ema_angle_deg: 95
     rr_ratio: 1.5
   sss:
-    min_swing_pips: 0.3
-    min_confluence_score: 0
+    swing_lookback_n: 5
+    min_swing_pips: 3.0
+    ss_candle_min: 9
+    iss_candle_min: 5
+    iss_candle_max: 7
+    entry_mode: cbc_only
+    min_confluence_score: 3
     min_stop_pips: 15.0
     warmup_bars: 30
     rr_ratio: 1.5
     spread_multiplier: 3.0
+  fx_at_one_glance:
+    # MGC's recent 5M tape is much quieter than the original forex/XAU
+    # course examples. The default FXAOG hard gates (five elements +
+    # range filter + tier B / score 6) collapse signal frequency to near
+    # zero on the futures feed, so use a looser profile by default.
+    five_elements_mode: disabled
+    signal_cooldown_bars: 12
+    reentry_price_tolerance_points: 5.0
+    reentry_stop_tolerance_points: 2.0
+    range_filter:
+      adx_min: 0
+      cloud_thickness_min_usd: 0.0
+    signal:
+      min_confluence_score: 2
+      min_tier: C

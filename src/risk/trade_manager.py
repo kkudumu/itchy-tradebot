@@ -8,6 +8,7 @@ constants on this module.
 from __future__ import annotations
 
 import datetime
+import math
 from typing import Dict, List, Optional, Tuple
 
 from src.risk.circuit_breaker import DailyCircuitBreaker
@@ -150,6 +151,17 @@ class TradeManager:
         if direction not in ("long", "short"):
             raise ValueError(f"direction must be 'long' or 'short', got '{direction}'")
 
+        numeric_inputs = {
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "point_value": point_value,
+            "account_equity": account_equity,
+        }
+        for name, value in numeric_inputs.items():
+            if not math.isfinite(float(value)):
+                raise RuntimeError(f"Cannot open trade: {name} is not finite")
+
         can_open, reason = self.can_open_trade(account_equity, instrument)
         if not can_open:
             raise RuntimeError(f"Cannot open trade: {reason}")
@@ -163,6 +175,10 @@ class TradeManager:
             instrument=instrument,
             stop_distance_override=actual_stop_distance,
         )
+        if not math.isfinite(float(pos.lot_size)) or pos.lot_size <= 0:
+            raise RuntimeError(
+                f"Cannot open trade: calculated size {pos.lot_size!r} is not tradable"
+            )
 
         trade = ActiveTrade(
             entry_price=entry_price,

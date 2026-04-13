@@ -414,26 +414,57 @@ def run_backtest(args: argparse.Namespace) -> int:
     try:
         from src.backtesting.vectorbt_engine import IchimokuBacktester
 
-        # Build full config dict for the backtester from raw YAML.
-        # The Pydantic model doesn't capture active_strategies or prop_firm,
-        # so we load the raw strategy YAML for those fields.
+        # Build the backtester config from the validated AppConfig so the
+        # active instrument's futures profile overrides are preserved. We
+        # still read raw YAML for active_strategies because that field is
+        # intentionally kept outside the pydantic StrategyConfig model.
         import yaml as _yaml
         _raw_strat = {}
         _strat_yaml = Path(loader.config_dir) / "strategy.yaml"
         if _strat_yaml.exists():
             with _strat_yaml.open() as _f:
                 _raw_strat = _yaml.safe_load(_f) or {}
+        _mega_cfg = {}
+        _mega_yaml = Path(loader.config_dir) / "mega_vision.yaml"
+        if _mega_yaml.exists():
+            with _mega_yaml.open() as _f:
+                _mega_cfg = _yaml.safe_load(_f) or {}
 
+        strategy_snapshot = (
+            app_config.strategy.model_dump()
+            if hasattr(app_config, "strategy")
+            else {}
+        )
         bt_config = {}
         if hasattr(app_config, "edges"):
             bt_config["edges"] = app_config.edges.model_dump()
         bt_config["active_strategies"] = _raw_strat.get(
-            "active_strategies", [_raw_strat.get("active_strategy", "ichimoku")]
+            "active_strategies",
+            [strategy_snapshot.get("active_strategy", "ichimoku")],
         )
-        bt_config["strategies"] = _raw_strat.get("strategies", {})
+        bt_config["strategies"] = strategy_snapshot.get("strategies", {})
         for key in ("risk", "exit", "prop_firm"):
-            if key in _raw_strat:
-                bt_config[key] = _raw_strat[key]
+            if key in strategy_snapshot:
+                bt_config[key] = strategy_snapshot[key]
+        if _mega_cfg:
+            bt_config["mega_vision"] = _mega_cfg
+
+        instrument_cfg = None
+        if hasattr(app_config, "instruments"):
+            instrument_cfg = app_config.instruments.get(args.instrument)
+        if instrument_cfg is not None:
+            bt_config["instrument_class"] = instrument_cfg.class_.value
+            bt_config["instrument"] = {
+                "symbol": instrument_cfg.symbol,
+                "class": instrument_cfg.class_.value,
+                "tick_size": instrument_cfg.tick_size,
+                "tick_value_usd": instrument_cfg.tick_value_usd,
+                "contract_size": instrument_cfg.contract_size,
+                "commission_per_contract_round_trip": instrument_cfg.commission_per_contract_round_trip,
+                "session_open_ct": instrument_cfg.session_open_ct,
+                "session_close_ct": instrument_cfg.session_close_ct,
+                "daily_reset_hour_ct": instrument_cfg.daily_reset_hour_ct,
+            }
 
         prop = bt_config.get("prop_firm", {})
         p1 = prop.get("phase_1", {})

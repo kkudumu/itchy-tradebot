@@ -1,12 +1,10 @@
 """
-Download continuous Gold futures bars from TopstepX / ProjectX.
+Download calendar-stitched futures bars from TopstepX / ProjectX.
 
-This script builds a simple calendar-rolled continuous series by stitching
-the standard metals contract cycle:
-    G, J, M, Q, V, Z  -> Feb, Apr, Jun, Aug, Oct, Dec
-
-It currently uses Micro Gold (MGC) by default because the repository is
-configured around that product, but you can switch to full Gold (GCE).
+The script was originally gold-specific; it now supports multiple ProjectX
+futures products and discovers the exact contract IDs directly from the API.
+That keeps the contract calendar aligned with what ProjectX actually exposes
+instead of relying on a hand-maintained month-code list per product.
 """
 
 from __future__ import annotations
@@ -32,18 +30,26 @@ from src.providers import ProjectXApiError, build_projectx_stack
 
 
 _MONTH_CODE_TO_MONTH = {
+    "F": 1,
     "G": 2,
+    "H": 3,
     "J": 4,
+    "K": 5,
     "M": 6,
+    "N": 7,
     "Q": 8,
+    "U": 9,
     "V": 10,
+    "X": 11,
     "Z": 12,
 }
+_ALL_MONTH_CODES = tuple(_MONTH_CODE_TO_MONTH.keys())
 _PRODUCT_TO_SYMBOL_ID = {
     "MGC": "F.US.MGC",
     "GCE": "F.US.GCE",
+    "MCLE": "F.US.MCLE",
 }
-_EARLIEST_VISIBLE_GOLD_YEAR = 2024
+_EARLIEST_VISIBLE_FUTURES_YEAR = 2024
 _TIMEFRAME_MAP = {
     "1M": (2, 1, timedelta(minutes=1)),
     "5M": (2, 5, timedelta(minutes=5)),
@@ -75,12 +81,17 @@ def _load_local_env() -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Download a calendar-stitched Gold futures series from TopstepX / ProjectX.",
+        description="Download a calendar-stitched futures series from TopstepX / ProjectX.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--start", required=True, help="UTC ISO start timestamp.")
     parser.add_argument("--end", required=True, help="UTC ISO end timestamp.")
-    parser.add_argument("--product", choices=["MGC", "GCE"], default="MGC", help="Gold product to stitch.")
+    parser.add_argument(
+        "--product",
+        choices=sorted(_PRODUCT_TO_SYMBOL_ID),
+        default="MGC",
+        help="ProjectX futures product to stitch.",
+    )
     parser.add_argument("--timeframe", choices=["1M", "5M", "15M", "1H"], default="1M")
     parser.add_argument("--limit-per-request", type=int, default=20000)
     parser.add_argument("--output", type=str, default=None, help="Optional output parquet path.")
@@ -97,18 +108,19 @@ def _parse_utc(value: str) -> datetime:
     return ts.to_pydatetime()
 
 
-def _discover_gold_contracts(client, product: str, start_year: int, end_year: int) -> list[dict]:
+def _discover_contracts(client, product: str, start_year: int, end_year: int) -> list[dict]:
     contracts: list[dict] = []
+    expected_symbol_id = _PRODUCT_TO_SYMBOL_ID[product]
     for year in range(start_year, end_year + 1):
         yy = year % 100
-        for code in ("G", "J", "M", "Q", "V", "Z"):
+        for code in _ALL_MONTH_CODES:
             contract_id = f"CON.F.US.{product}.{code}{yy:02d}"
             try:
                 resp = client.search_contract_by_id(contract_id)
             except Exception:
                 continue
             contract = resp.get("contract")
-            if contract:
+            if contract and contract.get("symbolId") == expected_symbol_id:
                 contracts.append(contract)
     contracts.sort(key=lambda c: (_contract_month_start(c["id"])))
     return contracts
@@ -140,13 +152,15 @@ def _build_windows(
 
     effective_start = max(requested_start, earliest_supported_start)
     windows: list[ContractWindow] = []
-    prev_month_start: datetime | None = None
-
-    for contract in contracts:
-        month_start = _contract_month_start(contract["id"])
-        window_start = prev_month_start or effective_start
-        window_end = month_start
-        prev_month_start = month_start
+    for idx, contract in enumerate(contracts):
+        if idx == 0:
+            window_start = effective_start
+        else:
+            window_start = _contract_month_start(contracts[idx - 1]["id"])
+        if idx == len(contracts) - 1:
+            window_end = requested_end
+        else:
+            window_end = _contract_month_start(contract["id"])
 
         if window_end <= effective_start:
             continue
@@ -165,18 +179,6 @@ def _build_windows(
                     window_end=clipped_end,
                 )
             )
-
-    if prev_month_start is not None and prev_month_start < requested_end:
-        last_contract = contracts[-1]
-        windows.append(
-            ContractWindow(
-                contract_id=last_contract["id"],
-                symbol_id=last_contract["symbolId"],
-                name=last_contract["name"],
-                window_start=max(prev_month_start, effective_start),
-                window_end=requested_end,
-            )
-        )
 
     deduped: list[ContractWindow] = []
     for win in windows:
@@ -255,7 +257,7 @@ def _fetch_contract_bars(
     return merged.set_index(pd.DatetimeIndex(merged["time"], tz="UTC")).drop(columns=["time"])
 
 
-def download_gold_series(
+def download_futures_series(
     start: datetime,
     end: datetime,
     product: str,
@@ -268,10 +270,10 @@ def download_gold_series(
     cfg = load_config()
     client, _, _, _ = build_projectx_stack(cfg.provider.projectx, cfg.instruments)
 
-    contracts = _discover_gold_contracts(
+    contracts = _discover_contracts(
         client,
         product=product,
-        start_year=_EARLIEST_VISIBLE_GOLD_YEAR,
+        start_year=_EARLIEST_VISIBLE_FUTURES_YEAR,
         end_year=end.year,
     )
     windows, earliest_supported_start = _build_windows(contracts, start, end)
@@ -290,6 +292,7 @@ def download_gold_series(
         "requested_start": start.isoformat(),
         "requested_end": end.isoformat(),
         "product": product,
+        "symbol_id": _PRODUCT_TO_SYMBOL_ID[product],
         "timeframe": timeframe,
         "earliest_supported_start": earliest_supported_start.isoformat() if earliest_supported_start else None,
         "windows": [],
@@ -361,6 +364,27 @@ def download_gold_series(
     return output_path
 
 
+def download_gold_series(
+    start: datetime,
+    end: datetime,
+    product: str,
+    timeframe: str,
+    limit_per_request: int,
+    output_path: Path,
+    metadata_path: Path | None = None,
+) -> Path:
+    """Backward-compatible alias for older wrappers/imports."""
+    return download_futures_series(
+        start=start,
+        end=end,
+        product=product,
+        timeframe=timeframe,
+        limit_per_request=limit_per_request,
+        output_path=output_path,
+        metadata_path=metadata_path,
+    )
+
+
 def main() -> int:
     args = _build_parser().parse_args()
     start = _parse_utc(args.start)
@@ -375,7 +399,7 @@ def main() -> int:
     metadata_path = Path(args.metadata_json) if args.metadata_json else output_path.with_suffix(".json")
 
     try:
-        download_gold_series(
+        download_futures_series(
             start=start,
             end=end,
             product=product,

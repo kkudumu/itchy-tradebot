@@ -1,0 +1,39 @@
+{
+  "data_start": "2026-03-10 23:58:00+00:00",
+  "data_end": "2026-04-09 23:58:00+00:00",
+  "bars": 26892,
+  "initial_balance": 50000.0,
+  "baseline": {
+    "trades": 6,
+    "win_rate": 0.0,
+    "return_pct": -2.756,
+    "max_dd_pct": 2.756,
+    "expectancy": -1.0,
+    "topstep_score": -0.4593333333333212,
+    "opt_score": -0.3993333333333212,
+    "prop_status": "pending"
+  },
+  "optimization": {
+    "best_value": -0.3272166666666526,
+    "best_params": {
+      "sss_swing_lookback_n": 5,
+      "sss_min_swing_pips": 3.0,
+      "sss_ss_candle_min": 9,
+      "sss_iss_candle_min": 5,
+      "sss_iss_candle_max": 7,
+      "sss_entry_mode": "cbc_only",
+      "sss_min_confluence_score": 3
+    },
+    "n_trials": 20
+  },
+  "optimized": {
+    "trades": 12,
+    "win_rate": 0.1667,
+    "return_pct": -2.6833,
+    "max_dd_pct": 2.9069,
+    "expectancy": -0.5863,
+    "topstep_score": -0.4472166666666526,
+    "opt_score": -0.3272166666666526,
+    "prop_status": "pending"
+  }
+}

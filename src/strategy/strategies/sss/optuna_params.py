@@ -29,42 +29,16 @@ from src.strategy.base import STRATEGY_REGISTRY
 
 
 class SSSOptunaAdapter:
-    """Thin adapter exposing the SSS Optuna parameter search space.
-
-    This class is not a full ``Strategy`` subclass — it exists solely to
-    provide ``suggest_params`` for ``PropFirmObjective`` without coupling
-    the SSS standalone implementation to the ABC hierarchy.
-
-    The returned dict uses the nested ``strategies.sss.*`` path so it can
-    be passed directly as the ``config`` argument to ``SSSBacktester`` or
-    merged into a composite config dict.
-    """
+    """Thin adapter exposing the SSS Optuna parameter search space."""
 
     name = "sss"
 
     def suggest_params(self, trial) -> dict:
         """Sample one point from the SSS parameter search space.
 
-        Parameters
-        ----------
-        trial:
-            An ``optuna.Trial`` instance used to call ``trial.suggest_*``.
-
-        Returns
-        -------
-        dict
-            Nested config dict: ``{"strategies": {"sss": {...}}}``.
-            Ready to pass as *config* to the SSS backtester.
-
-        Search space (7 parameters, ~2 000 combinations)
-        -------------------------------------------------
-        swing_lookback_n    : int [2, 5]   — bars back for swing detection
-        min_swing_pips      : float [0.5, 5.0, step=0.5] — minimum swing size
-        ss_candle_min       : int [8, 15]  — min candles in SS leg
-        iss_candle_min      : int [3, 5]   — min candles in ISS leg
-        iss_candle_max      : int [6, 8]   — max candles in ISS leg
-        entry_mode          : categorical  — CBC-only, 50%-tap, or combined
-        min_confluence_score: int [2, 6]   — minimum confluence points to trade
+        The bounds are intentionally widened enough to cover the current
+        futures profile defaults, so optimization can compare the live
+        profile against both stricter and looser SSS variants.
         """
         return {
             "active_strategies": ["sss"],
@@ -74,29 +48,27 @@ class SSSOptunaAdapter:
                         "sss_swing_lookback_n", 2, 5
                     ),
                     "min_swing_pips": trial.suggest_float(
-                        "sss_min_swing_pips", 0.5, 5.0, step=0.5
+                        "sss_min_swing_pips", 0.3, 5.0, step=0.1
                     ),
                     "ss_candle_min": trial.suggest_int(
-                        "sss_ss_candle_min", 8, 15
+                        "sss_ss_candle_min", 6, 15
                     ),
                     "iss_candle_min": trial.suggest_int(
-                        "sss_iss_candle_min", 3, 5
+                        "sss_iss_candle_min", 2, 5
                     ),
                     "iss_candle_max": trial.suggest_int(
-                        "sss_iss_candle_max", 6, 8
+                        "sss_iss_candle_max", 5, 8
                     ),
                     "entry_mode": trial.suggest_categorical(
-                        "sss_entry_mode", ["cbc_only"]
+                        "sss_entry_mode", ["cbc_only", "fifty_tap", "combined"]
                     ),
                     "min_confluence_score": trial.suggest_int(
-                        "sss_min_confluence_score", 1, 4
+                        "sss_min_confluence_score", 0, 4
                     ),
                 }
             }
         }
 
 
-# Register on import — idempotent guard prevents duplicate-key errors when
-# the module is re-imported (e.g. during test collection).
 if "sss" not in STRATEGY_REGISTRY:
     STRATEGY_REGISTRY["sss"] = SSSOptunaAdapter

@@ -1,0 +1,454 @@
+{
+  "run_id": "opt_iter_002_20260331_043156",
+  "timestamp": "2026-03-31T04:54:42.155333+00:00",
+  "metrics": {
+    "win_rate": 0.025,
+    "profit_factor": 3.4939,
+    "expectancy": 1.3533,
+    "total_trades": 80.0,
+    "avg_r_multiple": 1.3533,
+    "avg_win_r": 75.8369,
+    "avg_loss_r": -0.5566,
+    "gross_profit_r": 151.6737,
+    "gross_loss_r": 43.4111,
+    "sharpe_ratio": 0.2886,
+    "sortino_ratio": 0.1821,
+    "calmar_ratio": 0.1816,
+    "max_drawdown_pct": 6.439,
+    "max_daily_dd_pct": 1.2342,
+    "total_return_pct": 1.169,
+    "avg_trade_duration": "87 days, 20:07:17.420218",
+    "consecutive_wins_max": 2.0,
+    "consecutive_losses_max": 78.0,
+    "dd_peak_date": "2025-10-23 03:35:00+00:00",
+    "dd_trough_date": "2026-01-16 08:15:00+00:00",
+    "initial_balance": 10000.0,
+    "final_equity": 10116.9,
+    "pipeline_counts": {
+      "signals_generated": 1706,
+      "signals_filtered_in_trade": 1624,
+      "signals_filtered_no_open": 1,
+      "signals_filtered_edge": 0,
+      "signals_filtered_learning": 0,
+      "signals_filtered_open_rejected": 0,
+      "signals_entered": 80
+    }
+  },
+  "best_trades": [
+    {
+      "entry_time": "2025-09-22 01:30:00+00:00",
+      "exit_time": "2026-03-31 04:54:41.993815+00:00",
+      "entry_price": 3698.485,
+      "exit_price": 4493.448,
+      "direction": "long",
+      "r_multiple": 136.12800820632307,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2026-03-17 11:00:00+00:00",
+      "exit_time": "2026-03-31 04:54:41.993995+00:00",
+      "entry_price": 4998.405,
+      "exit_price": 4493.448,
+      "direction": "short",
+      "r_multiple": 15.545738842596414,
+      "pnl": null,
+      "confluence_score": 5,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-10-07 12:10:00+00:00",
+      "exit_time": "2026-03-31 04:33:03.777367+00:00",
+      "entry_price": 3972.095,
+      "exit_price": 3986.325,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 5,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-10-10 13:55:00+00:00",
+      "exit_time": "2026-03-31 04:33:12.678142+00:00",
+      "entry_price": 3989.505,
+      "exit_price": 4040.035,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 5,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-10-12 19:55:00+00:00",
+      "exit_time": "2026-03-31 04:33:13.401092+00:00",
+      "entry_price": 4032.135,
+      "exit_price": 4074.395,
+      "direction": "long",
+      "r_multiple": 0.0,
+      "pnl": null,
+      "confluence_score": 6,
+      "signal_tier": "B",
+      "edge_results": null
+    }
+  ],
+  "worst_trades": [
+    {
+      "entry_time": "2025-12-23 21:05:00+00:00",
+      "exit_time": "2026-03-31 04:42:10.471569+00:00",
+      "entry_price": 4512.765,
+      "exit_price": 4477.275,
+      "direction": "long",
+      "r_multiple": -1.6830801362398329,
+      "pnl": null,
+      "confluence_score": 5,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2025-09-21 22:25:00+00:00",
+      "exit_time": "2026-03-31 04:31:59.521086+00:00",
+      "entry_price": 3691.255,
+      "exit_price": 3688.898,
+      "direction": "long",
+      "r_multiple": -1.3281974774987473,
+      "pnl": null,
+      "confluence_score": 2,
+      "signal_tier": "A+",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2026-03-06 11:25:00+00:00",
+      "exit_time": "2026-03-31 04:52:44.829193+00:00",
+      "entry_price": 5137.845,
+      "exit_price": 5068.375,
+      "direction": "long",
+      "r_multiple": -1.279387985870938,
+      "pnl": null,
+      "confluence_score": 6,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2026-01-13 11:45:00+00:00",
+      "exit_time": "2026-03-31 04:45:04.625250+00:00",
+      "entry_price": 4608.338,
+      "exit_price": 4572.075,
+      "direction": "long",
+      "r_multiple": -1.261216016326974,
+      "pnl": null,
+      "confluence_score": 6,
+      "signal_tier": "B",
+      "edge_results": null
+    },
+    {
+      "entry_time": "2026-01-14 02:00:00+00:00",
+      "exit_time": "2026-03-31 04:45:13.708373+00:00",
+      "entry_price": 4632.395,
+      "exit_price": 4607.495,
+      "direction": "long",
+      "r_multiple": -1.2516022016135175,
+      "pnl": null,
+      "confluence_score": 5,
+      "signal_tier": "B",
+      "edge_results": null
+    }
+  ],
+  "edge_stats": {},
+  "config_snapshot": {
+    "atr_stop_multiplier": 2.5,
+    "atr_period": 14,
+    "adx_period": 14,
+    "adx_threshold": 20,
+    "tenkan_period": 9,
+    "kijun_period": 26,
+    "senkou_b_period": 52,
+    "min_confluence_score": 1,
+    "tier_a_plus": 7,
+    "tier_b": 5,
+    "tier_c": 1,
+    "timeframes": [
+      "15M",
+      "5M"
+    ],
+    "initial_risk_pct": 0.5,
+    "reduced_risk_pct": 0.75,
+    "phase_threshold_pct": 4.0,
+    "daily_circuit_breaker_pct": 4.5,
+    "max_concurrent_positions": 3,
+    "strategy": "hybrid_50_50",
+    "tp_r_multiple": 1.5,
+    "trail_type": "kijun",
+    "breakeven_threshold_r": 1.0,
+    "kijun_trail_start_r": 1.5,
+    "higher_tf_kijun_start_r": 3.0,
+    "active_strategy": "ichimoku",
+    "prop_firm": {
+      "name": "the5ers_2step_high_stakes",
+      "account_size": 10000,
+      "leverage": 100,
+      "phase_1": {
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "phase_2": {
+        "profit_target_pct": 5.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "time_limit_days": 0
+      },
+      "funded": {
+        "monthly_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0
+      }
+    },
+    "active_strategies": [
+      "ichimoku",
+      "asian_breakout",
+      "ema_pullback"
+    ],
+    "asian_breakout": {
+      "enabled": true,
+      "weight": 1.0,
+      "asian_session_start_utc": "21:00",
+      "asian_session_end_utc": "06:00",
+      "london_entry_start_utc": "06:00",
+      "london_entry_end_utc": "20:00",
+      "min_range_pips": 3,
+      "max_range_pips": 80,
+      "rr_ratio": 2.0,
+      "atr_period": 14
+    },
+    "ema_pullback": {
+      "enabled": true,
+      "weight": 1.0,
+      "fast_ema": 8,
+      "mid_ema": 18,
+      "slow_ema": 50,
+      "atr_period": 14,
+      "min_ema_angle_deg": 2,
+      "max_ema_angle_deg": 95,
+      "pullback_candles_min": 1,
+      "pullback_candles_max": 20,
+      "breakout_window_bars": 20,
+      "rr_ratio": 2.0
+    },
+    "edges": {
+      "time_of_day": {
+        "enabled": false,
+        "params": {
+          "start_utc": "06:00",
+          "end_utc": "21:00"
+        }
+      },
+      "day_of_week": {
+        "enabled": false,
+        "params": {
+          "allowed_days": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "london_open_delay": {
+        "enabled": false,
+        "params": {
+          "london_open_utc": "08:00",
+          "delay_minutes": 30
+        }
+      },
+      "candle_close_confirmation": {
+        "enabled": false,
+        "params": {}
+      },
+      "spread_filter": {
+        "enabled": false,
+        "params": {
+          "max_spread_points": 30
+        }
+      },
+      "news_filter": {
+        "enabled": false,
+        "params": {
+          "block_minutes_before": 30,
+          "block_minutes_after": 30,
+          "impact_levels": [
+            "red"
+          ]
+        }
+      },
+      "friday_close": {
+        "enabled": true,
+        "params": {
+          "close_time_utc": "20:00",
+          "day": 4
+        }
+      },
+      "regime_filter": {
+        "enabled": false,
+        "params": {
+          "adx_min": 28,
+          "cloud_thickness_percentile": 50
+        }
+      },
+      "time_stop": {
+        "enabled": false,
+        "params": {
+          "candle_limit": 12,
+          "breakeven_r_threshold": 0.5
+        }
+      },
+      "bb_squeeze": {
+        "enabled": false,
+        "params": {
+          "bb_period": 20,
+          "bb_std": 2.0,
+          "squeeze_threshold": 0.05,
+          "confidence_boost": 1
+        }
+      },
+      "confluence_scoring": {
+        "enabled": false,
+        "params": {
+          "min_score": 4,
+          "tier_a_plus_threshold": 7,
+          "tier_b_threshold": 5,
+          "tier_c_threshold": 4,
+          "tier_b_size_pct": 0.75,
+          "tier_c_size_pct": 0.5
+        }
+      },
+      "equity_curve": {
+        "enabled": false,
+        "params": {
+          "lookback_trades": 20,
+          "reduced_size_multiplier": 0.5
+        }
+      }
+    }
+  },
+  "comparison": {
+    "has_previous": true,
+    "avg_loss_r": {
+      "current": -0.5566,
+      "previous": -0.5439,
+      "delta": -0.0127
+    },
+    "avg_r_multiple": {
+      "current": 1.3533,
+      "previous": -0.0147,
+      "delta": 1.368
+    },
+    "avg_win_r": {
+      "current": 75.8369,
+      "previous": 6.159,
+      "delta": 69.6779
+    },
+    "calmar_ratio": {
+      "current": 0.1816,
+      "previous": 1.8808,
+      "delta": -1.6992
+    },
+    "consecutive_losses_max": {
+      "current": 78.0,
+      "previous": 23.0,
+      "delta": 55.0
+    },
+    "consecutive_wins_max": {
+      "current": 2.0,
+      "previous": 1.0,
+      "delta": 1.0
+    },
+    "expectancy": {
+      "current": 1.3533,
+      "previous": -0.0147,
+      "delta": 1.368
+    },
+    "final_equity": {
+      "current": 10116.9,
+      "previous": 10832.43,
+      "delta": -715.53
+    },
+    "gross_loss_r": {
+      "current": 43.4111,
+      "previous": 57.109,
+      "delta": -13.6979
+    },
+    "gross_profit_r": {
+      "current": 151.6737,
+      "previous": 55.4312,
+      "delta": 96.2425
+    },
+    "initial_balance": {
+      "current": 10000.0,
+      "previous": 10000.0,
+      "delta": 0.0
+    },
+    "max_daily_dd_pct": {
+      "current": 1.2342,
+      "previous": 0.9821,
+      "delta": 0.2521
+    },
+    "max_drawdown_pct": {
+      "current": 6.439,
+      "previous": 4.426,
+      "delta": 2.013
+    },
+    "profit_factor": {
+      "current": 3.4939,
+      "previous": 0.9706,
+      "delta": 2.5233
+    },
+    "sharpe_ratio": {
+      "current": 0.2886,
+      "previous": 1.8808,
+      "delta": -1.5922
+    },
+    "sortino_ratio": {
+      "current": 0.1821,
+      "previous": 1.0399,
+      "delta": -0.8578
+    },
+    "total_return_pct": {
+      "current": 1.169,
+      "previous": 8.3243,
+      "delta": -7.1553
+    },
+    "total_trades": {
+      "current": 80.0,
+      "previous": 114.0,
+      "delta": -34.0
+    },
+    "win_rate": {
+      "current": 0.025,
+      "previous": 0.0789,
+      "delta": -0.0539
+    }
+  },
+  "challenge_simulation": {
+    "pass_rate": 0.27616666666666667,
+    "rolling_pass_rate": 0.3333333333333333,
+    "monte_carlo_pass_rate": 0.219,
+    "total_windows": 1003,
+    "full_pass_count": 220,
+    "phase_1_pass_count": 705,
+    "avg_days_phase_1": 19.561079545454547,
+    "avg_days_phase_2": 8.287671232876711,
+    "failure_breakdown": {
+      "total_dd": 564,
+      "no_trades": 219
+    },
+    "funded_avg_monthly_return": -5.233853972116684,
+    "months_above_10pct": 0
+  },
+  "claude_reasoning": "## Changes Made (2 parameter changes)\n\n| Parameter | Old | New | Rationale |\n|-----------|-----|-----|-----------|\n| `initial_risk_pct` | 0.5% | 0.3% | Extends survival from ~20 to ~33 trades before 10% drawdown. P(33 consecutive losses) = 43% vs P(20) = 60% |\n| `reduced_risk_pct` | 0.75% | 0.4% | Was *increasing* risk after gains (0.5\u21920.75%), now properly *reduces* it (0.3\u21920.4%). Protects the 4%+ buffer instead of gambling it away |\n\n**Why these two:** The strategy is a \"whale hunter\" \u2014 it needs to *survive* long losing streaks to catch rare R=136+ runners. Both changes extend the survival window. A single big winner at 0.3% risk still generates 40%+ account growth, easily passing both phases. The critical fix is `reduced_risk_pct`: increasing risk after building a buffer was actively sabotaging accounts that were on track to pass.\n",
+  "claude_prompt": "You are a quantitative trading strategy optimizer for a The5ers 2-Step prop firm challenge.\n\n## Current Run: opt_iter_002_20260331_043156\n### Challenge Simulation Results\n- Pass Rate:              27.6%\n- Phase 1 Passes:         705/1003\n- Phase 2 Passes:         220/1003\n- Avg Days Phase 1:       20\n- Avg Days Phase 2:       8\n\n### Failure Breakdown\n- total_dd: 564\n- no_trades: 219\n\n**BIGGEST FAILURE MODE: total_dd** -- prioritize fixing this.\n\n### Secondary Metrics\n- Sharpe Ratio:   N/A\n- Win Rate:       0.025\n- Trade Count:    N/A\n- Max Drawdown:   N/A\n- Profit Factor:  3.4939\n\n### Trade Details (worst first)\n- long @ 4512.77 -> 4477.27  R=-1.68  reason: ?\n- long @ 3691.26 -> 3688.90  R=-1.33  reason: ?\n- long @ 5137.85 -> 5068.38  R=-1.28  reason: ?\n- long @ 4608.34 -> 4572.07  R=-1.26  reason: ?\n- long @ 4632.40 -> 4607.49  R=-1.25  reason: ?\n- long @ 3698.49 -> 4493.45  R=136.13  reason: ?\n- short @ 4998.40 -> 4493.45  R=15.55  reason: ?\n- long @ 3972.09 -> 3986.32  R=0.00  reason: ?\n- long @ 3989.51 -> 4040.03  R=0.00  reason: ?\n- long @ 4032.14 -> 4074.39  R=0.00  reason: ?\n\n## Similar Past Configurations\nNone available yet.\n\n## Accumulated Strategy Learnings\nStrategy Learnings (most recent last):\n  Run opt_iter_001_20260330_173002: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_002_20260330_174717: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_003_20260330_180204: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_004_20260330_180847: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_005_20260330_181517: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_006_20260330_182136: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_007_20260330_182755: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_008_20260330_183423: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_009_20260330_184110: enabled, min_confluence_score, tier_c, london_entry_end_utc, min_range_pips \u2192 WinRate 6.7%\u21926.7% (kept)\n  Run opt_iter_001_20260330_203156: (no changes) \u2192 WinRate 12.5%\u219212.5% (kept)\n  Run opt_iter_001_20260331_032138: enabled, candle_limit, stop_multiplier, tp_r_multiple \u2192 WinRate 7.9%\u21923.5% (reverted)\n\n## Current Config Snapshot\n```yaml\nactive_strategies:\n- ichimoku\n- asian_breakout\n- ema_pullback\nactive_strategy: ichimoku\nadx_period: 14\nadx_threshold: 20\nasian_breakout:\n  asian_session_end_utc: 06:00\n  asian_session_start_utc: '21:00'\n  atr_period: 14\n  enabled: true\n  london_entry_end_utc: '20:00'\n  london_entry_start_utc: 06:00\n  max_range_pips: 80\n  min_range_pips: 3\n  rr_ratio: 2.0\n  weight: 1.0\natr_period: 14\natr_stop_multiplier: 2.5\nbreakeven_threshold_r: 1.0\ndaily_circuit_breaker_pct: 4.5\nedges:\n  bb_squeeze:\n    enabled: false\n    params:\n      bb_period: 20\n      bb_std: 2.0\n      confidence_boost: 1\n      squeeze_threshold: 0.05\n  candle_close_confirmation:\n    enabled: false\n    params: {}\n  confluence_scoring:\n    enabled: false\n    params:\n      min_score: 4\n      tier_a_plus_threshold: 7\n      tier_b_size_pct: 0.75\n      tier_b_threshold: 5\n      tier_c_size_pct: 0.5\n      tier_c_threshold: 4\n  day_of_week:\n    enabled: false\n    params:\n      allowed_days:\n      - 1\n      - 2\n      - 3\n  equity_curve:\n    enabled: false\n    params:\n      lookback_trades: 20\n      reduced_size_multiplier: 0.5\n  friday_close:\n    enabled: true\n    params:\n      close_time_utc: '20:00'\n      day: 4\n  london_open_delay:\n    enabled: false\n    params:\n      delay_minutes: 30\n      london_open_utc: 08:00\n  news_filter:\n    enabled: false\n    params:\n      block_minutes_after: 30\n      block_minutes_before: 30\n      impact_levels:\n      - red\n  regime_filter:\n    enabled: false\n    params:\n      adx_min: 28\n      cloud_thickness_percentile: 50\n  spread_filter:\n    enabled: false\n    params:\n      max_spread_points: 30\n  time_of_day:\n    enabled: false\n    params:\n      end_utc: '21:00'\n      start_utc: 06:00\n  time_stop:\n    enabled: false\n    params:\n      breakeven_r_threshold: 0.5\n      candle_limit: 12\nema_pullback:\n  atr_period: 14\n  breakout_window_bars: 20\n  enabled: true\n  fast_ema: 8\n  max_ema_angle_deg: 95\n  mid_ema: 18\n  min_ema_angle_deg: 2\n  pullback_candles_max: 20\n  pullback_candles_min: 1\n  rr_ratio: 2.0\n  slow_ema: 50\n  weight: 1.0\nhigher_tf_kijun_start_r: 3.0\ninitial_risk_pct: 0.5\nkijun_period: 26\nkijun_trail_start_r: 1.5\nmax_concurrent_positions: 3\nmin_confluence_score: 1\nphase_threshold_pct: 4.0\nprop_firm:\n  account_size: 10000\n  funded:\n    daily_loss_pct: 5.0\n    max_"
+}

@@ -23,6 +23,7 @@ from .spread_filter import SpreadFilter
 from .news_filter import NewsFilter, NewsCalendar
 from .friday_close import FridayCloseFilter
 from .regime_filter import RegimeFilter
+from .trend_direction import TrendDirectionFilter
 from .time_stop import TimeStopFilter
 from .bb_squeeze import BBSqueezeAmplifier
 from .confluence_scoring import ConfluenceScoringFilter
@@ -39,6 +40,7 @@ _REGISTRY: dict[str, tuple[type[EdgeFilter], str]] = {
     "spread_filter":             (SpreadFilter,                   "entry"),
     "news_filter":               (NewsFilter,                     "entry"),
     "regime_filter":             (RegimeFilter,                   "entry"),
+    "trend_direction":           (TrendDirectionFilter,           "entry"),
     "friday_close":              (FridayCloseFilter,              "exit"),
     "time_stop":                 (TimeStopFilter,                 "exit"),
     "bb_squeeze":                (BBSqueezeAmplifier,             "modifier"),

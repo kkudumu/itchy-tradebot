@@ -14,6 +14,7 @@ they depend on (tick_size, pip_size, pip_value_per_lot, contract caps).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -65,13 +66,20 @@ class ForexLotSizer:
     min_lot_size: float = 0.01
 
     def size_for_risk(self, risk_usd: float, stop_distance_price: float) -> float:
-        if risk_usd <= 0 or stop_distance_price <= 0:
+        if (
+            not math.isfinite(risk_usd)
+            or not math.isfinite(stop_distance_price)
+            or risk_usd <= 0
+            or stop_distance_price <= 0
+        ):
             return self.min_lot_size
         stop_pips = stop_distance_price / self.pip_size
         dollars_per_lot_at_stop = stop_pips * self.pip_value_per_lot
-        if dollars_per_lot_at_stop <= 0:
+        if not math.isfinite(dollars_per_lot_at_stop) or dollars_per_lot_at_stop <= 0:
             return self.min_lot_size
         raw = risk_usd / dollars_per_lot_at_stop
+        if not math.isfinite(raw):
+            return self.min_lot_size
         clamped = min(self.max_lot_size, max(self.min_lot_size, raw))
         return round(clamped, 2)
 
@@ -105,13 +113,20 @@ class FuturesContractSizer:
     min_contracts: int = 1
 
     def size_for_risk(self, risk_usd: float, stop_distance_price: float) -> int:
-        if risk_usd <= 0 or stop_distance_price <= 0:
+        if (
+            not math.isfinite(risk_usd)
+            or not math.isfinite(stop_distance_price)
+            or risk_usd <= 0
+            or stop_distance_price <= 0
+        ):
             return 0
         stop_ticks = stop_distance_price / self.tick_size
         dollars_per_contract_at_stop = stop_ticks * self.tick_value_usd
-        if dollars_per_contract_at_stop <= 0:
+        if not math.isfinite(dollars_per_contract_at_stop) or dollars_per_contract_at_stop <= 0:
             return 0
         raw = risk_usd / dollars_per_contract_at_stop
+        if not math.isfinite(raw):
+            return 0
         # Round down — never over-risk because of rounding
         contracts = int(raw)
         if contracts < self.min_contracts:

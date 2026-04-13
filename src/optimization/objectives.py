@@ -183,10 +183,23 @@ class PropFirmObjective:
         if result is None:
             return 0.0
 
+        # Topstep-style dollar combines should optimize against the
+        # combine pass objective directly instead of the generic
+        # sharpe/return heuristic used by the legacy pct-based flows.
+        prop_cfg = self._base_config.get("prop_firm", {}) if isinstance(self._base_config, dict) else {}
+        prop_style = str(prop_cfg.get("style") or "").strip().lower()
         metrics = result.metrics
         prop = result.prop_firm
-
         n_trades = _safe_float(metrics.get("total_trades"), 0.0)
+
+        if prop_style == "topstep_combine_dollar":
+            if n_trades <= 0:
+                return -2.0
+            score = topstep_combine_pass_score(result)
+            if n_trades < 5:
+                return score - 0.5
+            return score + min(n_trades, 20.0) / 100.0
+
         if n_trades == 0:
             return 0.0
 

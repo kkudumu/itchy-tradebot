@@ -1,0 +1,4 @@
+Validation report: 20260411_000502
+Verdict: NO-GO
+- NO-GO — Zero OOS trades collected from walk-forward windows.
+- Ensure the data window is long enough to produce at least one complete walk-forward window (12-month IS + 3-month OOS).

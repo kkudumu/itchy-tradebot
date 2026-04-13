@@ -731,6 +731,7 @@ html, body {
   <div id="chart-wrapper">
     <div id="chart-container"></div>
     <div id="tf-buttons">
+      <button class="tf-btn" data-tf="1m">1M</button>
       <button class="tf-btn active" data-tf="5m">5M</button>
       <button class="tf-btn" data-tf="15m">15M</button>
       <button class="tf-btn" data-tf="1h">1H</button>
@@ -862,8 +863,8 @@ const { createChart, CandlestickSeries, LineSeries } = LightweightCharts;
 const state = {
   running: false,
   done: false,
-  equity: 10000,
-  initialBalance: 10000,
+  equity: null,
+  initialBalance: null,
   equityHistory: [],
   trades: [],
   selectedTradeIdx: -1,
@@ -1114,7 +1115,7 @@ let seriesMarkers = null;
 function snapToCandle(ts) {
   // Snap a timestamp to the nearest candle boundary for the current timeframe
   // so Lightweight Charts can match the marker to a data point
-  const intervals = { '5m': 300, '15m': 900, '1h': 3600, '4h': 14400 };
+  const intervals = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400 };
   const interval = intervals[state.currentTf] || 300;
   return Math.floor(ts / interval) * interval;
 }
@@ -1440,9 +1441,11 @@ function updateGauges(s) {
 }
 
 function updateEquityPanel(s) {
-  const eq = s.equity || 0;
-  const init = s.initial_balance || 10000;
-  const ret = ((eq - init) / init * 100);
+  const eq = Number.isFinite(s.equity)
+    ? s.equity
+    : (Number.isFinite(s.initial_balance) ? s.initial_balance : 0);
+  const init = Number.isFinite(s.initial_balance) ? s.initial_balance : eq;
+  const ret = init > 0 ? ((eq - init) / init * 100) : 0;
   document.getElementById('equity-value').textContent = '$' + eq.toLocaleString('en-US', { maximumFractionDigits: 2 });
   const retEl = document.getElementById('equity-return');
   retEl.textContent = (ret >= 0 ? '+' : '') + ret.toFixed(2) + '%';
@@ -1716,7 +1719,7 @@ setInterval(poll, 500);
 
 // Also poll all timeframe candle data in the background
 async function pollOtherTfs() {
-  const tfs = ['5m', '15m', '1h', '4h'];
+  const tfs = ['1m', '5m', '15m', '1h', '4h'];
   for (const tf of tfs) {
     if (tf === state.currentTf) continue;
     try {

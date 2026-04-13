@@ -819,9 +819,11 @@ async function pollLive() {
     else if (d.running || d.bar_index > 0) { dot.className = 'status-dot running'; lbl.textContent = 'Running'; }
     else { dot.className = 'status-dot'; lbl.textContent = 'Idle'; }
 
-    const eq = d.equity || d.initial_balance || 10000;
-    const init = d.initial_balance || 10000;
-    const ret = ((eq - init) / init * 100);
+    const eq = Number.isFinite(d.equity)
+      ? d.equity
+      : (Number.isFinite(d.initial_balance) ? d.initial_balance : 0);
+    const init = Number.isFinite(d.initial_balance) ? d.initial_balance : eq;
+    const ret = init > 0 ? ((eq - init) / init * 100) : 0;
 
     document.getElementById('lv-balance').textContent = '$' + eq.toLocaleString(undefined, {maximumFractionDigits: 0});
     const retEl = document.getElementById('lv-return');

@@ -40,7 +40,11 @@ logger = logging.getLogger(__name__)
 class _DashboardState:
     """Thread-safe state container shared between backtest and HTTP server."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        initial_balance: float = 10_000.0,
+        instrument: str = "XAUUSD",
+    ) -> None:
         self._lock = threading.Lock()
         self._state: Dict[str, Any] = {
             "running": False,
@@ -49,8 +53,8 @@ class _DashboardState:
             "total_bars": 0,
             "pct_complete": 0.0,
             "elapsed_seconds": 0.0,
-            "equity": 10000.0,
-            "initial_balance": 10000.0,
+            "equity": float(initial_balance),
+            "initial_balance": float(initial_balance),
             "equity_history": [],
             "balance_pct": 0.0,
             "n_trades": 0,
@@ -71,7 +75,7 @@ class _DashboardState:
             "total_signals": 0,
             "skipped_signals": 0,
             "recent_trades": [],
-            "instrument": "XAUUSD",
+            "instrument": instrument,
             "start_time": "",
             "current_timestamp": "",
             "data_start_date": "",
@@ -372,15 +376,45 @@ class LiveDashboardServer:
     ) -> None:
         self._port = port
         self._auto_open = auto_open
-        self._state = _DashboardState()
         self._candle_buffer = _CandleBuffer()
         self._edge_manager = edge_manager
         self._app_config = app_config or {}
         self._config_dir = config_dir
         self._strategy_config: dict = dict(self._app_config.get("strategy", {})) if self._app_config else {}
+        _seed_balance = self._resolve_initial_balance()
+        _seed_instrument = self._resolve_instrument()
+        self._state = _DashboardState(
+            initial_balance=_seed_balance,
+            instrument=_seed_instrument,
+        )
         self._config_lock = threading.Lock()
         self._server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
+
+    def _resolve_initial_balance(self) -> float:
+        """Seed the dashboard with the configured account size when available."""
+        prop_firm = {}
+        strategy_cfg = self._app_config.get("strategy")
+        if isinstance(strategy_cfg, dict):
+            prop_firm = strategy_cfg.get("prop_firm") or {}
+        if not prop_firm and isinstance(self._app_config.get("prop_firm"), dict):
+            prop_firm = self._app_config.get("prop_firm") or {}
+
+        try:
+            return float(prop_firm.get("account_size", 10_000.0))
+        except (TypeError, ValueError):
+            return 10_000.0
+
+    def _resolve_instrument(self) -> str:
+        """Best-effort instrument label for the idle dashboard header."""
+        instrument = self._app_config.get("instrument")
+        if isinstance(instrument, dict):
+            symbol = instrument.get("symbol")
+            if symbol:
+                return str(symbol)
+        if isinstance(instrument, str) and instrument:
+            return instrument
+        return "XAUUSD"
 
     def start(self) -> None:
         """Start the HTTP server in a background thread."""

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c \"echo Task 6 Integration plan presented > C:\\\\Users\\\\kkudu\\\\.claude\\\\ftm-state\\\\.plan-presented\")",
+      "Bash(.venv/Scripts/python -m pytest tests/test_signal_engine.py -v --tb=short -q)",
+      "Bash(find C:UserskkuduDocumentsCodeitchy-tradebot -name python.exe -not -path *.claude*)",
+      "Bash(\"C:\\\\Users\\\\kkudu\\\\Documents\\\\Code\\\\itchy-tradebot\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest tests/test_signal_engine.py -v --tb=short -q)",
+      "Bash(\"C:\\\\Users\\\\kkudu\\\\Documents\\\\Code\\\\itchy-tradebot\\\\.venv\\\\Scripts\\\\python.exe\" -m pytest tests/integration/test_health_monitor_integration.py -v --tb=short)"
+    ]
+  }
+}
