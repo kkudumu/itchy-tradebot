@@ -20,10 +20,11 @@ strategies:
       - 15M
       - 5M
     min_confluence_score: 3
-    kijun_proximity_atr: 0.7
+    kijun_proximity_atr: 0.65
     weight: 2.0
     allowed_directions:
     - long
+    adx_threshold: 25
   asian_breakout:
     enabled: true
     weight: 1.3

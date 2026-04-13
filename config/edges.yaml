@@ -52,6 +52,9 @@ trend_direction:
     strategy_direction_overrides:
       fx_at_one_glance:
       - short
+    direction_overrides:
+      fx_at_one_glance:
+      - short
 time_stop:
   enabled: false
   params:
