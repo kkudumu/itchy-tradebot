@@ -48,6 +48,7 @@ trend_direction:
     block_without_data: false
     default_trend: bullish
     forced_trend: bullish
+    default_trend_when_missing: bullish
 time_stop:
   enabled: false
   params:
