@@ -19,6 +19,8 @@ strategies:
       timeframes:
       - 15M
       - 5M
+    min_confluence_score: 3
+    kijun_proximity_atr: 0.7
   asian_breakout:
     enabled: true
     weight: 1.0
