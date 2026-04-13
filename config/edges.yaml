@@ -49,6 +49,9 @@ trend_direction:
     default_trend: bullish
     forced_trend: bullish
     default_trend_when_missing: bullish
+    strategy_direction_overrides:
+      fx_at_one_glance:
+      - short
 time_stop:
   enabled: false
   params:
