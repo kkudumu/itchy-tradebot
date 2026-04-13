@@ -44,8 +44,8 @@ trend_direction:
   params:
     require_both_tf: false
     tolerance_pct: 0.3
-    htf_lookback: 30
-    block_without_data: false
+    htf_lookback: 50
+    block_without_data: true
     default_trend: bullish
     forced_trend: bullish
     default_trend_when_missing: bullish

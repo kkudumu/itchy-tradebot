@@ -38,17 +38,17 @@ strategies:
     atr_period: 14
   ema_pullback:
     enabled: false
-    weight: 1.0
+    weight: 1.5
     fast_ema: 8
     mid_ema: 18
     slow_ema: 50
     atr_period: 14
-    min_ema_angle_deg: 2
+    min_ema_angle_deg: 25
     max_ema_angle_deg: 95
     pullback_candles_min: 1
     pullback_candles_max: 20
     breakout_window_bars: 20
-    rr_ratio: 2.0
+    rr_ratio: 2.5
     allowed_directions:
     - long
   fx_at_one_glance:
@@ -97,7 +97,7 @@ strategies:
       max_stop_pips: 300
       min_rr_ratio: 1.5
     rr_ratio: 1.5
-    weight: 1.5
+    weight: 0.8
     allowed_directions:
     - short
   sss:
