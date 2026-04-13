@@ -21,7 +21,7 @@ strategies:
       - 5M
     min_confluence_score: 3
     kijun_proximity_atr: 0.7
-    weight: 1.5
+    weight: 2.0
     allowed_directions:
     - long
   asian_breakout:
@@ -97,6 +97,8 @@ strategies:
       min_rr_ratio: 1.5
     rr_ratio: 1.5
     weight: 1.5
+    allowed_directions:
+    - short
   sss:
     enabled: true
     weight: 1.0
