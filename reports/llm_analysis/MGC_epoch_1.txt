@@ -1,65 +1,26 @@
 ### REASONING
 
-**Dominant pattern: shorts print money, longs bleed it back.**
+**The edge is short-only â€” longs are bleeding the account.**
 
-The two active strategies on MGC are `ema_pullback` and `fx_at_one_glance`. Neither `ichimoku`, `sss`, nor `asian_breakout` generated any signals â€” they're either disabled or misconfigured for this instrument.
+| Strategy | Dir | WR | Avg R | Verdict |
+|---|---|---|---|---|
+| `ema_pullback` | short | 60.0% | +6.09 | **Star.** 234 wins from 390 entries. This alone funds the account. |
+| `fx_at_one_glance` | short | 30.8% | +4.16 | **Profitable.** Low WR but outsized winners compensate. 507 entries = volume engine. |
+| `ema_pullback` | long | 42.9% | -0.27 | **Net loser.** Nearly 43% WR should be profitable but avg R is negative â€” stops are too far from entry (slow-EMA anchor below price). The 2x ATR cap from the prior commit hasn't fixed this. |
+| `fx_at_one_glance` | long | 50.0% | -0.40 | **Net loser.** 50% WR and still negative avg R â€” the wins are smaller than the losses. Only 78 entries but each one drags. |
 
-**Winners:**
-- **ema_pullback short** (60.0% WR, +6.09 avg R) â€” This is an exceptional edge. 390 entries with consistent profit. Back-of-envelope: if R_loss=1, average winning R is ~10.8. Shorts are catching large directional moves.
-- **fx_at_one_glance short** (30.8% WR, +4.16 avg R) â€” Low WR but massive average R means winners are ~15R. Classic trend-capture behavior. 507 entries â€” this is the volume leader.
+**HTF Trend column shows "?" for every row.** The `block_without_data` flag was added in the prior commit, but the `should_allow()` method in `trend_direction.py` never reads it â€” when trend data is missing it unconditionally returns `allowed=True`. The flag is a dead field. This is the root cause: longs pass through unfiltered because the gate has no teeth.
 
-**Losers:**
-- **ema_pullback long** (42.9% WR, -0.27 avg R) â€” This is the smoking gun. 42.9% WR with 2:1 R:R should yield +0.29R expectancy, but actual is -0.27R. That's a 0.56R gap. The stop placement (anchored to slow EMA) is too wide on longs â€” in a trending environment the slow EMA lags far below entry, inflating the actual risk per trade well beyond 1R nominal.
-- **fx_at_one_glance long** (50.0% WR, -0.40 avg R) â€” Only 78 entries, but same pattern: wins aren't covering losses. Longs on gold during this regime are fighting the intraday flow.
+**ichimoku, sss, asian_breakout** generated zero signals on MGC across 196 trials. They're consuming warmup bars and compute for nothing.
 
-**HTF trend column shows "?" across all patterns** â€” the `trend_direction` edge filter either isn't enabled or isn't receiving populated `htf_trend_1h`/`htf_trend_4h` indicator values. This is the single biggest missed opportunity: enabling it would naturally suppress the losing long signals during bearish/neutral intraday regimes.
-
-**The 0.0% average win rate in the trial summary** contradicts per-pattern WRs (30â€“60%). This is a telemetry aggregation bug â€” likely computing WR at the trial level using a field that's always zero/null.
-
-**Strategy: lean into the short-side edge, suppress longs, boost ema_pullback.**
+**54.6% combine pass rate with 19 avg trades** â€” cutting longs removes ~351 losing entries (273 + 78) while keeping ~897 profitable short entries. Fewer trades but higher expectancy should push pass rate above 60%.
 
 ### CONFIG_CHANGES
 ```json
-{"config_changes": {
-  "edges.trend_direction.enabled": true,
-  "edges.trend_direction.params.block_without_data": true,
-  "edges.trend_direction.params.htf_lookback": 50,
-  "edges.trend_direction.params.tolerance_pct": 0.3,
-  "strategies.ema_pullback.weight": 1.5,
-  "strategies.fx_at_one_glance.weight": 0.8,
-  "strategies.ema_pullback.rr_ratio": 2.5,
-  "strategies.ema_pullback.min_ema_angle_deg": 25
-}}
+{"config_changes": {"edges.trend_direction.enabled": true, "edges.trend_direction.params.block_without_data": true, "strategies.ichimoku.enabled": false, "strategies.sss.enabled": false, "strategies.asian_breakout.enabled": false, "strategies.ema_pullback.weight": 1.5}}
 ```
-
-Rationale:
-- **trend_direction enabled + block_without_data=true**: Forces the system to have a trend opinion before taking any trade. This is the highest-impact change â€” it will filter out most of the losing longs when HTF trend is bearish.
-- **tolerance_pct 0.3** (from default 0.5): Tighter deadband means fewer "neutral" calls, more definitive trend filtering.
-- **ema_pullback weight 1.5**: It's the dominant edge on both sides. Give it priority in the blender.
-- **fx_at_one_glance weight 0.8**: Demote slightly â€” the 30.8% short WR still contributes but shouldn't dominate sizing.
-- **ema_pullback rr_ratio 2.5**: With 60% short WR, increasing the target from 2.0 to 2.5 improves expectancy. The avg R of +6.09 shows the market gives room for this.
-- **min_ema_angle_deg 25** (from 30): More permissive entry angle captures additional short setups that the 30Â° floor currently blocks.
 
 ### CODE_PATCHES
 ```json
-{"code_patches": [
-  {
-    "file": "src/strategy/strategies/ema_pullback.py",
-    "description": "Cap stop distance at 2x ATR for longs to prevent the slow-EMA anchor from creating outsized risk when EMAs are spread wide. This directly addresses the -0.27 avg R on longs despite 42.9% WR â€” the stop is too far from entry.",
-    "search": "        # SL anchor: slow EMA at the bar we armed (updated each bar in ARMED)\n        self._armed_slow_ema: Optional[float] = None",
-    "replace": "        # SL anchor: slow EMA at the bar we armed (updated each bar in ARMED)\n        self._armed_slow_ema: Optional[float] = None\n\n        # Max stop distance in ATR multiples (prevents outsized risk on longs)\n        self._max_stop_atr: float = float(self._cfg.get(\"max_stop_atr\", 2.0))"
-  },
-  {
-    "file": "src/edges/trend_direction.py",
-    "description": "When block_without_data is True, allow shorts through but block longs. Shorts are the proven edge on MGC â€” blocking them when trend data is missing would kill the best signals. Longs without trend confirmation are net losers.",
-    "search": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )",
-    "replace": "        if trend_1h is None and trend_4h is None:\n            if self._block_without_data and direction == \"long\":\n                return EdgeResult(\n                    allowed=False,\n                    edge_name=self.name,\n                    reason=\"long blocked: no HTF trend data available\",\n                )\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )"
-  }
-]}
+{"code_patches": [{"file": "src/edges/trend_direction.py", "description": "Actually use _block_without_data: when True and no HTF data available, block longs (net losers on MGC) but allow shorts (the proven edge). Currently the flag is set but never checked, so longs pass through unfiltered.", "search": "        if trend_1h is None and trend_4h is None:\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )", "replace": "        if trend_1h is None and trend_4h is None:\n            if self._block_without_data and direction == \"long\":\n                return EdgeResult(\n                    allowed=False,\n                    edge_name=self.name,\n                    reason=\"long blocked: no HTF trend data and block_without_data=True\",\n                )\n            return EdgeResult(\n                allowed=True,\n                edge_name=self.name,\n                reason=\"no HTF trend data â€” filter skipped\",\n            )"}]}
 ```
-
-**Summary of expected impact:**
-- Enabling trend_direction + asymmetric block-without-data should eliminate ~70% of losing long entries while preserving the short-side edge
-- Boosting ema_pullback weight and widening the R:R target compounds the already-strong 60% WR short signal
-- The stop distance cap on longs addresses the root cause of the -0.27R avg on ema_pullback longs (stops anchored to lagging slow EMA)
-- Conservative estimate: pass rate from 54.6% â†’ 62â€“68% by cutting long-side bleed

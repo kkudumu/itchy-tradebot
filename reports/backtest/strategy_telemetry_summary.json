@@ -1,45 +1,45 @@
 {
   "run_id": "backtest",
-  "total_events": 519,
+  "total_events": 2412,
   "per_strategy": {
-    "ema_pullback": {
-      "generated": 275,
-      "entered": 16,
+    "sss": {
+      "generated": 1996,
+      "entered": 0,
       "rejected": 0,
-      "exited": 16,
-      "entry_rate_pct": 5.82
+      "exited": 0,
+      "entry_rate_pct": 0.0
+    },
+    "ema_pullback": {
+      "generated": 225,
+      "entered": 0,
+      "rejected": 0,
+      "exited": 0,
+      "entry_rate_pct": 0.0
     },
     "fx_at_one_glance": {
-      "generated": 164,
-      "entered": 23,
+      "generated": 191,
+      "entered": 0,
       "rejected": 0,
-      "exited": 23,
-      "entry_rate_pct": 14.02
-    },
-    "ichimoku": {
-      "generated": 0,
-      "entered": 1,
-      "rejected": 0,
-      "exited": 1,
+      "exited": 0,
       "entry_rate_pct": 0.0
     }
   },
   "per_session": {
-    "asian": 128,
-    "london": 65,
-    "overlap": 53,
-    "ny": 183,
-    "off": 90
+    "asian": 673,
+    "london": 482,
+    "overlap": 434,
+    "ny": 546,
+    "off": 277
   },
   "per_pattern": {
-    "walking_dragon": 7,
-    "kumo_breakout": 87,
-    "kijun_bounce": 20,
-    "kumo_twist": 28,
-    "kijun_break": 13,
-    "ffo": 2,
-    "fractal_breakout": 6,
-    "rolling_dragon": 1
+    "kumo_twist": 34,
+    "kumo_breakout": 97,
+    "kijun_break": 10,
+    "kijun_bounce": 40,
+    "walking_dragon": 3,
+    "ffo": 3,
+    "rolling_dragon": 1,
+    "fractal_breakout": 3
   },
   "top_rejection_stages": {}
 }

@@ -25,7 +25,10 @@ fx_at_one_glance |                  | long  | ?        |   78 |  39 |  50.0% | -
 No chart screenshots available this epoch.
 
 ## Your Prior Analysis
-No prior analysis history.
+Epoch 1: [config skipped, no code changes] **Shorts are the edge; longs are a drag.** This is the clearest pattern in the data:  | Strategy | Dir | WR | Avg R | Verdict | |---|---|---|---|---| | `ema_pullback` | short | 60.0% | +6.09 | **Star 
+Epoch 1: [config skipped, no code changes] **The edge is short-only.** This is the third epoch confirming the same pattern â€” shorts print money on MGC, longs bleed it back:  | Strategy | Dir | WR | Avg R | Verdict | |---|---|---|---|---| | `
+Epoch 1: [config skipped, no code changes] 
+Epoch 1: [config skipped, no code changes] **Dominant pattern: shorts print money, longs bleed it back.**  The two active strategies on MGC are `ema_pullback` and `fx_at_one_glance`. Neither `ichimoku`, `sss`, nor `asian_breakout` generated an
 
 ## Current Strategy Code
 ### src/strategy/strategies/sss/strategy.py
@@ -272,6 +275,9 @@ class EMAPullbackStrategy:
         # SL anchor: slow EMA at the bar we armed (updated each bar in ARMED)
         self._armed_slow_ema: Optional[float] = None
 
+        # Max stop distance in ATR multiples (prevents outsized risk on longs)
+        self._max_stop_atr: float = float(self._cfg.get("max_stop_atr", 2.0))
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -331,9 +337,6 @@ class EMAPullbackStrategy:
             signal = self._handle_window_open(
                 timestamp, open, high, low, close,
                 ema_fast, ema_mid, ema_slow, atr,
-            )
-
-        # Always update previous ema_fast for angle calc on next bar
 ```
 
 ### src/strategy/strategies/asian_breakout.py
